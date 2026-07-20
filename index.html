@@ -123,13 +123,13 @@ async function doConnect() {
   controlChar = await service.getCharacteristic(CONTROL_UUID);
 
   const sampleChar = await service.getCharacteristic(SAMPLE_UUID);
-  await sampleChar.startNotifications();
   sampleChar.addEventListener('characteristicvaluechanged', e => handleSamplePacket(e.target.value, false));
+  await sampleChar.startNotifications();
 
   document.getElementById('historyBanner').style.display = 'block';
   const historyChar = await service.getCharacteristic(HISTORY_UUID);
-  await historyChar.startNotifications();
   historyChar.addEventListener('characteristicvaluechanged', e => handleSamplePacket(e.target.value, true));
+  await historyChar.startNotifications();
 
   setStatus(true, 'Verbunden');
 }
