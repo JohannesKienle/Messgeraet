@@ -44,7 +44,9 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   font-size: 15px; font-weight: 600;
 }
 .channel-value.on { color: #68d391; }
-.channel-canvas { flex: 1; height: 64px; background: #14171d; border-radius: 6px; }
+.channel-canvas { flex: 1; height: 64px; background: #14171d; border-radius: 6px; cursor: grab; }
+#channels { touch-action: none; user-select: none; }
+.gesture-hint { padding: 0 16px 8px; font-size: 12px; color: #565d6b; }
 </style>
 </head>
 <body>
@@ -57,12 +59,12 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   <button id="btnStartStop" disabled>Stop</button>
   <button id="btnClear" disabled>Puffer leeren</button>
   <button id="btnDownload" disabled>CSV herunterladen</button>
-  <select id="windowSel">
-    <option value="30">30 s</option>
-    <option value="60" selected>60 s</option>
-    <option value="300">5 min</option>
-  </select>
+  <button class="preset-btn" data-span="30">30 s</button>
+  <button class="preset-btn" data-span="60">60 s</button>
+  <button class="preset-btn" data-span="300">5 min</button>
+  <button id="btnLive">Live</button>
 </div>
+<div class="gesture-hint">Ziehen zum Scrollen · zwei Finger bzw. Mausrad zum Zoomen</div>
 <div class="demo-banner" id="demoBanner">Demo-Modus: simulierte Werte, bis Sensor-Hardware angeschlossen ist</div>
 <div class="history-banner" id="historyBanner">Lade gespeicherten Verlauf vom Geraet…</div>
 <div class="hint" id="hint">
@@ -80,12 +82,16 @@ const HISTORY_UUID  = '1079034a-acd2-460c-844e-3bcab8d5eb1b';
 
 const PALETTE = ['#4fd1c5', '#f6ad55', '#63b3ed', '#fc8181', '#b794f4', '#68d391', '#f687b3', '#faf089'];
 const MAX_SAMPLES = 3000;
+const MIN_SPAN_MS = 5000;          // am weitesten reingezoomt: 5s
+const MAX_SPAN_MS = 6 * 60 * 1000; // am weitesten rausgezoomt: 6min
 
 let bleDevice = null;
 let controlChar = null;
 let channelMeta = [];
 let sampleMap = new Map();   // t_ms -> [v0, v1, ...]
 let running = true;
+let viewSpanMs = 60000;      // aktuell sichtbarer Zeitraum (Zoom-Level)
+let viewEndMs = null;        // null = folgt live, sonst eingefrorener Zeitpunkt
 
 function setStatus(connected, text) {
   document.getElementById('dot').className = 'dot ' + (connected ? 'ok' : 'bad');
@@ -208,9 +214,40 @@ function updateReadouts(v) {
   });
 }
 
+function currentViewEnd(sorted) {
+  if (viewEndMs !== null) return viewEndMs;
+  const s = sorted || getSortedSamples();
+  return s.length ? s[s.length - 1].t : Date.now();
+}
+
+function getRefRect() {
+  const firstCanvas = document.querySelector('.channel-canvas');
+  return firstCanvas ? firstCanvas.getBoundingClientRect() : null;
+}
+
+function xToTime(clientX, rect) {
+  const frac = (clientX - rect.left) / rect.width;
+  const end = currentViewEnd();
+  return (end - viewSpanMs) + frac * viewSpanMs;
+}
+
+function clampSpan(span) {
+  return Math.min(MAX_SPAN_MS, Math.max(MIN_SPAN_MS, span));
+}
+
+function clampView() {
+  const sorted = getSortedSamples();
+  if (!sorted.length || viewEndMs === null) return;
+  const latest = sorted[sorted.length - 1].t;
+  if (viewEndMs > latest) viewEndMs = latest;
+  if (viewEndMs >= latest - 200) viewEndMs = null;   // nah am Rand -> zurueck auf live
+}
+
 function redrawAll() {
   const sorted = getSortedSamples();
   channelMeta.forEach((_, idx) => drawChannel(idx, sorted));
+  const liveBtn = document.getElementById('btnLive');
+  if (liveBtn) liveBtn.classList.toggle('primary', viewEndMs !== null);
 }
 
 function drawChannel(idx, sorted) {
@@ -233,11 +270,11 @@ function drawChannel(idx, sorted) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
 
-  const windowMs = parseInt(document.getElementById('windowSel').value, 10) * 1000;
+  const windowMs = viewSpanMs;
   if (!sorted.length) return;
-  const now = sorted[sorted.length - 1].t;
+  const now = currentViewEnd(sorted);
   const tMin = now - windowMs;
-  const pts = sorted.filter(s => s.t >= tMin);
+  const pts = sorted.filter(s => s.t >= tMin && s.t <= now);
   if (pts.length < 2) return;
 
   const xOf = t => ((t - tMin) / windowMs) * w;
@@ -281,6 +318,7 @@ document.getElementById('btnStartStop').addEventListener('click', () => {
 document.getElementById('btnClear').addEventListener('click', () => {
   writeControl(2);
   sampleMap.clear();
+  viewEndMs = null;
   redrawAll();
   document.getElementById('btnDownload').disabled = true;
 });
@@ -300,7 +338,87 @@ document.getElementById('btnDownload').addEventListener('click', () => {
   URL.revokeObjectURL(url);
 });
 
-document.getElementById('windowSel').addEventListener('change', redrawAll);
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    viewSpanMs = parseInt(btn.dataset.span, 10) * 1000;
+    viewEndMs = null;
+    redrawAll();
+  });
+});
+
+document.getElementById('btnLive').addEventListener('click', () => {
+  viewEndMs = null;
+  redrawAll();
+});
+
+// ---- Pan (Ziehen) und Pinch-Zoom ueber Pointer Events ----
+const channelsEl = document.getElementById('channels');
+let activePointers = new Map();
+let dragLastX = null;
+let pinchStartDist = null;
+let pinchStartSpan = null;
+
+channelsEl.addEventListener('pointerdown', e => {
+  channelsEl.setPointerCapture(e.pointerId);
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (activePointers.size === 1) {
+    dragLastX = e.clientX;
+  } else if (activePointers.size === 2) {
+    const pts = Array.from(activePointers.values());
+    pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+    pinchStartSpan = viewSpanMs;
+  }
+});
+
+channelsEl.addEventListener('pointermove', e => {
+  if (!activePointers.has(e.pointerId)) return;
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const rect = getRefRect();
+  if (!rect) return;
+
+  if (activePointers.size === 1 && dragLastX !== null) {
+    const dxPixels = e.clientX - dragLastX;
+    const dtMs = -(dxPixels / rect.width) * viewSpanMs;
+    viewEndMs = currentViewEnd() + dtMs;
+    clampView();
+    dragLastX = e.clientX;
+    redrawAll();
+  } else if (activePointers.size === 2 && pinchStartDist) {
+    const pts = Array.from(activePointers.values());
+    const dist = Math.max(Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y), 1);
+    viewSpanMs = clampSpan(pinchStartSpan * (pinchStartDist / dist));
+    clampView();
+    redrawAll();
+  }
+});
+
+function endPointer(e) {
+  activePointers.delete(e.pointerId);
+  if (activePointers.size < 2) pinchStartDist = null;
+  if (activePointers.size === 1) {
+    dragLastX = Array.from(activePointers.values())[0].x;
+  } else if (activePointers.size < 1) {
+    dragLastX = null;
+  }
+}
+channelsEl.addEventListener('pointerup', endPointer);
+channelsEl.addEventListener('pointercancel', endPointer);
+channelsEl.addEventListener('pointerleave', endPointer);
+
+// ---- Zoom per Mausrad (Desktop/Laptop) ----
+channelsEl.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = getRefRect();
+  if (!rect) return;
+  const anchorTime = xToTime(e.clientX, rect);
+  const newSpan = clampSpan(viewSpanMs * (e.deltaY < 0 ? 0.85 : 1 / 0.85));
+  const frac = (e.clientX - rect.left) / rect.width;
+  viewEndMs = anchorTime + (1 - frac) * newSpan;
+  viewSpanMs = newSpan;
+  clampView();
+  redrawAll();
+}, { passive: false });
+
 window.addEventListener('resize', redrawAll);
 </script>
 </body>
