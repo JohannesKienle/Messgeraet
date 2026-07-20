@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Messgeraet (Bluetooth)</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #e6e8eb;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid #262a33;
+  position: sticky; top: 0; background: #0f1115; z-index: 10;
+}
+h1 { font-size: 17px; font-weight: 600; margin: 0; }
+.status { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #8b93a1; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: #565d6b; display: inline-block; }
+.dot.ok { background: #68d391; }
+.dot.bad { background: #fc8181; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #262a33; }
+button, select {
+  background: #1b1e25; border: 1px solid #2f333c; color: #e6e8eb;
+  padding: 8px 14px; border-radius: 8px; font-size: 13px; min-height: 38px;
+}
+button:active { background: #262a33; }
+button:disabled { opacity: 0.4; }
+button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
+.demo-banner, .history-banner { display: none; font-size: 12px; padding: 8px 16px; }
+.demo-banner { background: #2a2410; color: #f6ad55; }
+.history-banner { background: #16202a; color: #63b3ed; }
+.hint { padding: 16px; font-size: 13px; color: #8b93a1; line-height: 1.5; }
+#channels { padding: 8px 16px 24px; }
+.channel-row { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #1d2027; padding: 8px 0; }
+.channel-info { width: 128px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
+.channel-info .dot { width: 8px; height: 8px; }
+.channel-name { font-size: 12px; color: #8b93a1; }
+.channel-value {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 15px; font-weight: 600;
+}
+.channel-value.on { color: #68d391; }
+.channel-canvas { flex: 1; height: 64px; background: #14171d; border-radius: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Messgeraet</h1>
+  <div class="status"><span id="dot" class="dot"></span><span id="statusText">Getrennt</span></div>
+</header>
+<div class="toolbar">
+  <button id="btnConnect" class="primary">Mit Messgeraet verbinden</button>
+  <button id="btnStartStop" disabled>Stop</button>
+  <button id="btnClear" disabled>Puffer leeren</button>
+  <button id="btnDownload" disabled>CSV herunterladen</button>
+  <select id="windowSel">
+    <option value="30">30 s</option>
+    <option value="60" selected>60 s</option>
+    <option value="300">5 min</option>
+  </select>
+</div>
+<div class="demo-banner" id="demoBanner">Demo-Modus: simulierte Werte, bis Sensor-Hardware angeschlossen ist</div>
+<div class="history-banner" id="historyBanner">Lade gespeicherten Verlauf vom Geraet…</div>
+<div class="hint" id="hint">
+  Funktioniert nur in Chrome oder Edge (Android, Windows, macOS). Safari und Firefox
+  unterstuetzen Web Bluetooth nicht. Zum Verbinden auf den Button oben tippen und den
+  ESP32 aus der Liste waehlen.
+</div>
+<div id="channels"></div>
+<script>
+const SERVICE_UUID  = '79a16fed-1190-4e22-ae20-2b580b72f82f';
+const CHANNELS_UUID = 'ca8eed79-c540-460e-827e-4486c6405eec';
+const SAMPLE_UUID   = '083cfd49-1af0-4781-ad1b-de854566c8bb';
+const CONTROL_UUID  = '47a03c81-b4e6-4f47-b8b1-8668beeac41c';
+const HISTORY_UUID  = '1079034a-acd2-460c-844e-3bcab8d5eb1b';
+
+const PALETTE = ['#4fd1c5', '#f6ad55', '#63b3ed', '#fc8181', '#b794f4', '#68d391', '#f687b3', '#faf089'];
+const MAX_SAMPLES = 3000;
+
+let bleDevice = null;
+let controlChar = null;
+let channelMeta = [];
+let sampleMap = new Map();   // t_ms -> [v0, v1, ...]
+let running = true;
+
+function setStatus(connected, text) {
+  document.getElementById('dot').className = 'dot ' + (connected ? 'ok' : 'bad');
+  document.getElementById('statusText').textContent = text;
+  document.getElementById('btnStartStop').disabled = !connected;
+  document.getElementById('btnClear').disabled = !connected;
+  document.getElementById('btnDownload').disabled = sampleMap.size === 0;
+  document.getElementById('btnConnect').textContent = connected ? 'Verbunden' : 'Mit Messgeraet verbinden';
+}
+
+async function connectBLE() {
+  try {
+    bleDevice = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+      optionalServices: [SERVICE_UUID]
+    });
+    bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+    await doConnect();
+  } catch (e) {
+    setStatus(false, 'Verbindung abgebrochen');
+  }
+}
+
+async function doConnect() {
+  const server = await bleDevice.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+
+  const channelsChar = await service.getCharacteristic(CHANNELS_UUID);
+  const channelsValue = await channelsChar.readValue();
+  const parsed = JSON.parse(new TextDecoder().decode(channelsValue));
+  channelMeta = parsed.channels;
+  buildChannelRows();
+  document.getElementById('demoBanner').style.display = parsed.demo ? 'block' : 'none';
+
+  controlChar = await service.getCharacteristic(CONTROL_UUID);
+
+  const sampleChar = await service.getCharacteristic(SAMPLE_UUID);
+  await sampleChar.startNotifications();
+  sampleChar.addEventListener('characteristicvaluechanged', e => handleSamplePacket(e.target.value, false));
+
+  document.getElementById('historyBanner').style.display = 'block';
+  const historyChar = await service.getCharacteristic(HISTORY_UUID);
+  await historyChar.startNotifications();
+  historyChar.addEventListener('characteristicvaluechanged', e => handleSamplePacket(e.target.value, true));
+
+  setStatus(true, 'Verbunden');
+}
+
+function onDisconnected() {
+  setStatus(false, 'Getrennt – verbinde neu…');
+  setTimeout(() => {
+    if (!bleDevice) return;
+    bleDevice.gatt.connect().then(doConnect).catch(() => {
+      setStatus(false, 'Getrennt – Button erneut antippen');
+    });
+  }, 1500);
+}
+
+function handleSamplePacket(dataView, isHistoryBatch) {
+  if (dataView.byteLength === 0) {
+    document.getElementById('historyBanner').style.display = 'none';
+    redrawAll();
+    return;
+  }
+  const recordSize = 4 + channelMeta.length * 4;
+  for (let offset = 0; offset + recordSize <= dataView.byteLength; offset += recordSize) {
+    const t = dataView.getUint32(offset, true);
+    const values = [];
+    for (let i = 0; i < channelMeta.length; i++) {
+      values.push(dataView.getFloat32(offset + 4 + i * 4, true));
+    }
+    sampleMap.set(t, values);
+    if (!isHistoryBatch) updateReadouts(values);
+  }
+  pruneSamples();
+  document.getElementById('btnDownload').disabled = sampleMap.size === 0;
+  if (!isHistoryBatch) redrawAll();
+}
+
+function pruneSamples() {
+  if (sampleMap.size <= MAX_SAMPLES) return;
+  const keys = Array.from(sampleMap.keys()).sort((a, b) => a - b);
+  const removeCount = keys.length - MAX_SAMPLES;
+  for (let i = 0; i < removeCount; i++) sampleMap.delete(keys[i]);
+}
+
+function getSortedSamples() {
+  return Array.from(sampleMap.entries())
+    .map(([t, v]) => ({ t, v }))
+    .sort((a, b) => a.t - b.t);
+}
+
+function buildChannelRows() {
+  const container = document.getElementById('channels');
+  container.innerHTML = '';
+  channelMeta.forEach((ch, idx) => {
+    const row = document.createElement('div');
+    row.className = 'channel-row';
+    row.innerHTML = `
+      <div class="channel-info">
+        <span class="dot" style="background:${PALETTE[idx % PALETTE.length]}"></span>
+        <div class="channel-name">${ch.name}</div>
+        <div class="channel-value" id="val-${idx}">–</div>
+      </div>
+      <canvas class="channel-canvas" id="canvas-${idx}"></canvas>`;
+    container.appendChild(row);
+  });
+}
+
+function updateReadouts(v) {
+  channelMeta.forEach((ch, idx) => {
+    const el = document.getElementById(`val-${idx}`);
+    if (!el) return;
+    if (ch.kind === 'digital') {
+      el.textContent = v[idx] > 0.5 ? 'EIN' : 'AUS';
+      el.classList.toggle('on', v[idx] > 0.5);
+    } else {
+      el.textContent = v[idx].toFixed(2) + ' V';
+    }
+  });
+}
+
+function redrawAll() {
+  const sorted = getSortedSamples();
+  channelMeta.forEach((_, idx) => drawChannel(idx, sorted));
+}
+
+function drawChannel(idx, sorted) {
+  const ch = channelMeta[idx];
+  const canvas = document.getElementById(`canvas-${idx}`);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const wantW = Math.round(rect.width * dpr), wantH = Math.round(rect.height * dpr);
+  if (canvas.width !== wantW || canvas.height !== wantH) { canvas.width = wantW; canvas.height = wantH; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = rect.width, h = rect.height, pad = 6;
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 1;
+  for (let gx = 1; gx < 4; gx++) {
+    const x = (w / 4) * gx;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+
+  const windowMs = parseInt(document.getElementById('windowSel').value, 10) * 1000;
+  if (!sorted.length) return;
+  const now = sorted[sorted.length - 1].t;
+  const tMin = now - windowMs;
+  const pts = sorted.filter(s => s.t >= tMin);
+  if (pts.length < 2) return;
+
+  const xOf = t => ((t - tMin) / windowMs) * w;
+  const yOf = val => {
+    if (ch.kind === 'digital') return val > 0.5 ? pad : h - pad;
+    const norm = (val - ch.min) / ((ch.max - ch.min) || 1);
+    return h - pad - norm * (h - 2 * pad);
+  };
+
+  ctx.strokeStyle = PALETTE[idx % PALETTE.length];
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(xOf(pts[0].t), yOf(pts[0].v[idx]));
+  for (let i = 1; i < pts.length; i++) {
+    const x = xOf(pts[i].t), y = yOf(pts[i].v[idx]);
+    if (ch.kind === 'digital') ctx.lineTo(x, yOf(pts[i - 1].v[idx]));
+    ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function writeControl(byte) {
+  if (!controlChar) return;
+  controlChar.writeValue(new Uint8Array([byte])).catch(() => {});
+}
+
+document.getElementById('btnConnect').addEventListener('click', () => {
+  if (!navigator.bluetooth) {
+    alert('Dieser Browser unterstuetzt Web Bluetooth nicht (Chrome oder Edge verwenden).');
+    return;
+  }
+  connectBLE();
+});
+
+document.getElementById('btnStartStop').addEventListener('click', () => {
+  running = !running;
+  writeControl(running ? 1 : 0);
+  document.getElementById('btnStartStop').textContent = running ? 'Stop' : 'Start';
+});
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  writeControl(2);
+  sampleMap.clear();
+  redrawAll();
+  document.getElementById('btnDownload').disabled = true;
+});
+
+document.getElementById('btnDownload').addEventListener('click', () => {
+  const sorted = getSortedSamples();
+  let csv = 't_ms' + channelMeta.map(c => ',' + c.name).join('') + '\n';
+  sorted.forEach(s => {
+    csv += s.t + s.v.map(v => ',' + v.toFixed(3)).join('') + '\n';
+  });
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'messung.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('windowSel').addEventListener('change', redrawAll);
+window.addEventListener('resize', redrawAll);
+</script>
+</body>
+</html>
