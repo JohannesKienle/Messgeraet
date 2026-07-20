@@ -47,6 +47,14 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 .channel-canvas { flex: 1; height: 64px; background: #14171d; border-radius: 6px; cursor: grab; }
 #channels { touch-action: none; user-select: none; }
 .gesture-hint { padding: 0 16px 8px; font-size: 12px; color: #565d6b; }
+#markerList { display: none; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
+.marker-chip {
+  background: #241f10; border: 1px solid #4a3f1e; color: #f6ad55;
+  font-size: 12px; padding: 4px 8px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+}
+.marker-del { opacity: 0.7; padding: 0 2px; }
+.marker-del:hover { opacity: 1; }
 </style>
 </head>
 <body>
@@ -58,6 +66,7 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   <button id="btnConnect" class="primary">Mit Messgeraet verbinden</button>
   <button id="btnStartStop" disabled>Stop</button>
   <button id="btnClear" disabled>Puffer leeren</button>
+  <button id="btnMarker" disabled>⚑ Marker setzen</button>
   <button id="btnDownload" disabled>CSV herunterladen</button>
   <button class="preset-btn" data-span="30">30 s</button>
   <button class="preset-btn" data-span="60">60 s</button>
@@ -65,6 +74,7 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   <button id="btnLive">Live</button>
 </div>
 <div class="gesture-hint">Ziehen zum Scrollen · zwei Finger bzw. Mausrad zum Zoomen</div>
+<div id="markerList"></div>
 <div class="demo-banner" id="demoBanner">Demo-Modus: simulierte Werte, bis Sensor-Hardware angeschlossen ist</div>
 <div class="history-banner" id="historyBanner">Lade gespeicherten Verlauf vom Geraet…</div>
 <div class="hint" id="hint">
@@ -92,12 +102,15 @@ let sampleMap = new Map();   // t_ms -> [v0, v1, ...]
 let running = true;
 let viewSpanMs = 60000;      // aktuell sichtbarer Zeitraum (Zoom-Level)
 let viewEndMs = null;        // null = folgt live, sonst eingefrorener Zeitpunkt
+let markers = [];            // { id, t, label }
+let markerCounter = 0;
 
 function setStatus(connected, text) {
   document.getElementById('dot').className = 'dot ' + (connected ? 'ok' : 'bad');
   document.getElementById('statusText').textContent = text;
   document.getElementById('btnStartStop').disabled = !connected;
   document.getElementById('btnClear').disabled = !connected;
+  document.getElementById('btnMarker').disabled = !connected;
   document.getElementById('btnDownload').disabled = sampleMap.size === 0;
   document.getElementById('btnConnect').textContent = connected ? 'Verbunden' : 'Mit Messgeraet verbinden';
 }
@@ -243,6 +256,35 @@ function clampView() {
   if (viewEndMs >= latest - 200) viewEndMs = null;   // nah am Rand -> zurueck auf live
 }
 
+function jumpToMarker(m) {
+  viewEndMs = m.t + viewSpanMs / 2;
+  clampView();
+  redrawAll();
+}
+
+function renderMarkerList() {
+  const el = document.getElementById('markerList');
+  el.innerHTML = '';
+  el.style.display = markers.length ? 'flex' : 'none';
+  markers.forEach(m => {
+    const chip = document.createElement('span');
+    chip.className = 'marker-chip';
+    chip.textContent = m.label;
+    chip.addEventListener('click', () => jumpToMarker(m));
+    const del = document.createElement('span');
+    del.className = 'marker-del';
+    del.textContent = '×';
+    del.addEventListener('click', ev => {
+      ev.stopPropagation();
+      markers = markers.filter(x => x.id !== m.id);
+      renderMarkerList();
+      redrawAll();
+    });
+    chip.appendChild(del);
+    el.appendChild(chip);
+  });
+}
+
 function redrawAll() {
   const sorted = getSortedSamples();
   channelMeta.forEach((_, idx) => drawChannel(idx, sorted));
@@ -270,30 +312,51 @@ function drawChannel(idx, sorted) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
 
-  const windowMs = viewSpanMs;
   if (!sorted.length) return;
+  const windowMs = viewSpanMs;
   const now = currentViewEnd(sorted);
   const tMin = now - windowMs;
-  const pts = sorted.filter(s => s.t >= tMin && s.t <= now);
-  if (pts.length < 2) return;
-
   const xOf = t => ((t - tMin) / windowMs) * w;
-  const yOf = val => {
-    if (ch.kind === 'digital') return val > 0.5 ? pad : h - pad;
-    const norm = (val - ch.min) / ((ch.max - ch.min) || 1);
-    return h - pad - norm * (h - 2 * pad);
-  };
 
-  ctx.strokeStyle = PALETTE[idx % PALETTE.length];
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(xOf(pts[0].t), yOf(pts[0].v[idx]));
-  for (let i = 1; i < pts.length; i++) {
-    const x = xOf(pts[i].t), y = yOf(pts[i].v[idx]);
-    if (ch.kind === 'digital') ctx.lineTo(x, yOf(pts[i - 1].v[idx]));
-    ctx.lineTo(x, y);
+  const pts = sorted.filter(s => s.t >= tMin && s.t <= now);
+  if (pts.length >= 2) {
+    const yOf = val => {
+      if (ch.kind === 'digital') return val > 0.5 ? pad : h - pad;
+      const norm = (val - ch.min) / ((ch.max - ch.min) || 1);
+      return h - pad - norm * (h - 2 * pad);
+    };
+    ctx.strokeStyle = PALETTE[idx % PALETTE.length];
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(xOf(pts[0].t), yOf(pts[0].v[idx]));
+    for (let i = 1; i < pts.length; i++) {
+      const x = xOf(pts[i].t), y = yOf(pts[i].v[idx]);
+      if (ch.kind === 'digital') ctx.lineTo(x, yOf(pts[i - 1].v[idx]));
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
+
+  ctx.strokeStyle = 'rgba(250, 224, 137, 0.85)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  markers.forEach(m => {
+    if (m.t < tMin || m.t > now) return;
+    const x = xOf(m.t);
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+    if (idx === 0) {
+      ctx.save();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(250, 224, 137, 0.95)';
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.fillText(m.label, x + 3, 10);
+      ctx.restore();
+    }
+  });
+  ctx.setLineDash([]);
 }
 
 function writeControl(byte) {
@@ -315,9 +378,20 @@ document.getElementById('btnStartStop').addEventListener('click', () => {
   document.getElementById('btnStartStop').textContent = running ? 'Stop' : 'Start';
 });
 
+document.getElementById('btnMarker').addEventListener('click', () => {
+  const sorted = getSortedSamples();
+  if (!sorted.length) return;
+  markerCounter++;
+  markers.push({ id: markerCounter, t: sorted[sorted.length - 1].t, label: 'M' + markerCounter });
+  renderMarkerList();
+  redrawAll();
+});
+
 document.getElementById('btnClear').addEventListener('click', () => {
   writeControl(2);
   sampleMap.clear();
+  markers = [];
+  renderMarkerList();
   viewEndMs = null;
   redrawAll();
   document.getElementById('btnDownload').disabled = true;
@@ -329,6 +403,10 @@ document.getElementById('btnDownload').addEventListener('click', () => {
   sorted.forEach(s => {
     csv += s.t + s.v.map(v => ',' + v.toFixed(3)).join('') + '\n';
   });
+  if (markers.length) {
+    csv += '\n# Marker\nt_ms,Label\n';
+    markers.forEach(m => { csv += m.t + ',' + m.label + '\n'; });
+  }
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
