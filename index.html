@@ -149,6 +149,7 @@ async function doConnect() {
   const historyChar = await service.getCharacteristic(HISTORY_UUID);
   historyChar.addEventListener('characteristicvaluechanged', e => handleSamplePacket(e.target.value, true));
   await historyChar.startNotifications();
+  console.log('History-Subscription aktiv, warte auf Pakete vom ESP32...');
 
   setStatus(true, 'Verbunden');
 }
@@ -165,10 +166,12 @@ function onDisconnected() {
 
 function handleSamplePacket(dataView, isHistoryBatch) {
   if (dataView.byteLength === 0) {
+    if (isHistoryBatch) console.log('History-Ende-Markierung empfangen, sampleMap-Groesse:', sampleMap.size);
     document.getElementById('historyBanner').style.display = 'none';
     redrawAll();
     return;
   }
+  if (isHistoryBatch) console.log('History-Paket:', dataView.byteLength, 'Byte');
   const recordSize = 4 + channelMeta.length * 4;
   for (let offset = 0; offset + recordSize <= dataView.byteLength; offset += recordSize) {
     const t = dataView.getUint32(offset, true);
