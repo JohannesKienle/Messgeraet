@@ -2,7 +2,7 @@
   "name": "Messgeraet",
   "short_name": "Messgeraet",
   "description": "Bluetooth-Dashboard fuer den ESP32-Datenlogger zur Maschinendiagnose",
-  "start_url": "./manifest.html",
+  "start_url": "./messgeraet_ble.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0f1115",
