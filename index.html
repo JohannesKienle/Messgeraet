@@ -541,6 +541,7 @@ let pinchStartDist = null;
 let pinchStartSpan = null;
 
 channelsEl.addEventListener('pointerdown', e => {
+  if (e.target.closest('.channel-hide')) return;   // Ausblenden-Button nicht als Zieh-/Zoom-Geste einfangen
   channelsEl.setPointerCapture(e.pointerId);
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (activePointers.size === 1) {
