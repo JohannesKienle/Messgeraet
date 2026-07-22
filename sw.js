@@ -6,7 +6,7 @@
 const CACHE_NAME = "messgeraet-cache-v1";
 const ASSETS = [
   "./",
-  "./messgeraet_ble.html",
+  "./index.html",
   "./manifest.json",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
