@@ -93,6 +93,7 @@ const CHANNELS_UUID = 'ca8eed79-c540-460e-827e-4486c6405eec';
 const SAMPLE_UUID   = '083cfd49-1af0-4781-ad1b-de854566c8bb';
 const CONTROL_UUID  = '47a03c81-b4e6-4f47-b8b1-8668beeac41c';
 const HISTORY_UUID  = '1079034a-acd2-460c-844e-3bcab8d5eb1b';
+const MARKERS_UUID  = '0a2a3e4c-b842-4454-ad48-062a179e480f';
 
 const PALETTE = ['#4fd1c5', '#f6ad55', '#63b3ed', '#fc8181', '#b794f4', '#68d391', '#f687b3', '#faf089'];
 const MAX_SAMPLES = 3000;
@@ -101,13 +102,14 @@ const MAX_SPAN_MS = 6 * 60 * 1000; // am weitesten rausgezoomt: 6min
 
 let bleDevice = null;
 let controlChar = null;
+let markersChar = null;
 let channelMeta = [];
 let sampleMap = new Map();   // t_ms -> [v0, v1, ...]
 let running = true;
 let viewSpanMs = 60000;      // aktuell sichtbarer Zeitraum (Zoom-Level)
 let viewEndMs = null;        // null = folgt live, sonst eingefrorener Zeitpunkt
-let markers = [];            // { id, t, label }
-let markerCounter = 0;
+let markers = [];            // { id, t, label } -- serverseitig verwaltet
+let incomingMarkers = [];    // Sammelpuffer, waehrend eine Marker-Liste hereinkommt
 
 function setStatus(connected, text) {
   document.getElementById('dot').className = 'dot ' + (connected ? 'ok' : 'bad');
@@ -155,6 +157,10 @@ async function doConnect() {
   await historyChar.startNotifications();
   console.log('History-Subscription aktiv, warte auf Pakete vom ESP32...');
 
+  markersChar = await service.getCharacteristic(MARKERS_UUID);
+  markersChar.addEventListener('characteristicvaluechanged', e => handleMarkerPacket(e.target.value));
+  await markersChar.startNotifications();
+
   setStatus(true, 'Verbunden');
 }
 
@@ -166,6 +172,24 @@ function onDisconnected() {
       setStatus(false, 'Getrennt – Button erneut antippen');
     });
   }, 1500);
+}
+
+function handleMarkerPacket(dataView) {
+  if (dataView.byteLength === 0) {
+    markers = incomingMarkers;
+    incomingMarkers = [];
+    renderMarkerList();
+    redrawAll();
+    return;
+  }
+  // MarkerRecord: uint16 id, uint32 t_ms, char label[12] (nullterminiert)
+  const id = dataView.getUint16(0, true);
+  const t = dataView.getUint32(2, true);
+  let label = '';
+  for (let i = 6; i < 18 && dataView.getUint8(i) !== 0; i++) {
+    label += String.fromCharCode(dataView.getUint8(i));
+  }
+  incomingMarkers.push({ id, t, label });
 }
 
 function handleSamplePacket(dataView, isHistoryBatch) {
@@ -286,6 +310,10 @@ function renderMarkerList() {
       markers = markers.filter(x => x.id !== m.id);
       renderMarkerList();
       redrawAll();
+      if (markersChar) {
+        const buf = new Uint8Array([2, m.id & 0xff, (m.id >> 8) & 0xff]);
+        markersChar.writeValue(buf).catch(() => {});
+      }
     });
     chip.appendChild(del);
     el.appendChild(chip);
@@ -386,16 +414,13 @@ document.getElementById('btnStartStop').addEventListener('click', () => {
 });
 
 document.getElementById('btnMarker').addEventListener('click', () => {
-  const sorted = getSortedSamples();
-  if (!sorted.length) return;
-  markerCounter++;
-  markers.push({ id: markerCounter, t: sorted[sorted.length - 1].t, label: 'M' + markerCounter });
-  renderMarkerList();
-  redrawAll();
+  if (!markersChar) return;
+  markersChar.writeValue(new Uint8Array([1])).catch(() => {});
 });
 
 document.getElementById('btnClear').addEventListener('click', () => {
   writeControl(2);
+  if (markersChar) markersChar.writeValue(new Uint8Array([3])).catch(() => {});
   sampleMap.clear();
   markers = [];
   renderMarkerList();
