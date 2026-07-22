@@ -59,6 +59,15 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 }
 .marker-del { opacity: 0.7; padding: 0 2px; }
 .marker-del:hover { opacity: 1; }
+.channel-hide { cursor: pointer; color: #565d6b; font-size: 15px; padding: 4px 8px; flex-shrink: 0; }
+.channel-hide:hover { color: #fc8181; }
+#hiddenList { display: none; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 16px 10px; }
+#hiddenList::before { content: "Ausgeblendet: "; color: #565d6b; font-size: 12px; }
+.hidden-chip {
+  background: #1b1e25; border: 1px solid #2f333c; color: #8b93a1;
+  font-size: 12px; padding: 4px 8px; border-radius: 999px; cursor: pointer;
+}
+.hidden-chip:hover { color: #e6e8eb; border-color: #4a5160; }
 </style>
 </head>
 <body>
@@ -79,6 +88,7 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 </div>
 <div class="gesture-hint">Ziehen zum Scrollen · zwei Finger bzw. Mausrad zum Zoomen</div>
 <div id="markerList"></div>
+<div id="hiddenList"></div>
 <div class="demo-banner" id="demoBanner">Demo-Modus: simulierte Werte, bis Sensor-Hardware angeschlossen ist</div>
 <div class="history-banner" id="historyBanner">Lade gespeicherten Verlauf vom Geraet…</div>
 <div class="hint" id="hint">
@@ -110,6 +120,42 @@ let viewSpanMs = 60000;      // aktuell sichtbarer Zeitraum (Zoom-Level)
 let viewEndMs = null;        // null = folgt live, sonst eingefrorener Zeitpunkt
 let markers = [];            // { id, t, label } -- serverseitig verwaltet
 let incomingMarkers = [];    // Sammelpuffer, waehrend eine Marker-Liste hereinkommt
+
+let hiddenChannels = new Set();
+try {
+  const savedHidden = localStorage.getItem('hiddenChannels');
+  if (savedHidden) hiddenChannels = new Set(JSON.parse(savedHidden));
+} catch (e) { /* localStorage evtl. nicht verfuegbar - dann eben ohne Persistenz */ }
+
+function saveHiddenChannels() {
+  try { localStorage.setItem('hiddenChannels', JSON.stringify([...hiddenChannels])); } catch (e) {}
+}
+
+function hideChannel(name) {
+  hiddenChannels.add(name);
+  saveHiddenChannels();
+  buildChannelRows();
+}
+
+function showChannel(name) {
+  hiddenChannels.delete(name);
+  saveHiddenChannels();
+  buildChannelRows();
+}
+
+function renderHiddenList() {
+  const el = document.getElementById('hiddenList');
+  const hiddenExisting = channelMeta.filter(ch => hiddenChannels.has(ch.name));
+  el.innerHTML = '';
+  el.style.display = hiddenExisting.length ? 'flex' : 'none';
+  hiddenExisting.forEach(ch => {
+    const chip = document.createElement('span');
+    chip.className = 'hidden-chip';
+    chip.textContent = '+ ' + ch.name;
+    chip.addEventListener('click', () => showChannel(ch.name));
+    el.appendChild(chip);
+  });
+}
 
 function setStatus(connected, text) {
   document.getElementById('dot').className = 'dot ' + (connected ? 'ok' : 'bad');
@@ -232,6 +278,7 @@ function buildChannelRows() {
   const container = document.getElementById('channels');
   container.innerHTML = '';
   channelMeta.forEach((ch, idx) => {
+    if (hiddenChannels.has(ch.name)) return;   // ausgeblendet, keine Zeile anlegen
     const row = document.createElement('div');
     row.className = 'channel-row';
     row.innerHTML = `
@@ -240,9 +287,12 @@ function buildChannelRows() {
         <div class="channel-name">${ch.name}</div>
         <div class="channel-value" id="val-${idx}">–</div>
       </div>
-      <canvas class="channel-canvas" id="canvas-${idx}"></canvas>`;
+      <canvas class="channel-canvas" id="canvas-${idx}"></canvas>
+      <span class="channel-hide" title="Kanal ausblenden">✕</span>`;
+    row.querySelector('.channel-hide').addEventListener('click', () => hideChannel(ch.name));
     container.appendChild(row);
   });
+  renderHiddenList();
 }
 
 function updateReadouts(v) {
