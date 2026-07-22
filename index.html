@@ -181,16 +181,37 @@ async function connectBLE() {
   }
 }
 
+function subscribeChannels(channelsChar) {
+  return new Promise((resolve, reject) => {
+    let buffer = '';
+    const handler = e => {
+      const dataView = e.target.value;
+      if (dataView.byteLength === 0) {
+        channelsChar.removeEventListener('characteristicvaluechanged', handler);
+        try {
+          const parsed = JSON.parse(buffer);
+          channelMeta = parsed.channels;
+          buildChannelRows();
+          document.getElementById('demoBanner').style.display = parsed.demo ? 'block' : 'none';
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+        return;
+      }
+      buffer += new TextDecoder().decode(dataView);
+    };
+    channelsChar.addEventListener('characteristicvaluechanged', handler);
+    channelsChar.startNotifications().catch(reject);
+  });
+}
+
 async function doConnect() {
   const server = await bleDevice.gatt.connect();
   const service = await server.getPrimaryService(SERVICE_UUID);
 
   const channelsChar = await service.getCharacteristic(CHANNELS_UUID);
-  const channelsValue = await channelsChar.readValue();
-  const parsed = JSON.parse(new TextDecoder().decode(channelsValue));
-  channelMeta = parsed.channels;
-  buildChannelRows();
-  document.getElementById('demoBanner').style.display = parsed.demo ? 'block' : 'none';
+  await subscribeChannels(channelsChar);
 
   controlChar = await service.getCharacteristic(CONTROL_UUID);
 
