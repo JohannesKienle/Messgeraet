@@ -176,6 +176,7 @@ async function connectBLE() {
     bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
     await doConnect();
   } catch (e) {
+    console.error('Verbindungsaufbau fehlgeschlagen:', e);
     setStatus(false, 'Verbindung abgebrochen');
   }
 }
