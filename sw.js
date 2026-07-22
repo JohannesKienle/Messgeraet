@@ -3,7 +3,7 @@
 // Aufruf auch komplett ohne Internetverbindung startet. Die Bluetooth-
 // Verbindung zum ESP32 selbst laeuft ohnehin unabhaengig davon.
 
-const CACHE_NAME = "messgeraet-cache-v2";
+const CACHE_NAME = "messgeraet-cache-v3";
 const ASSETS = [
   "./",
   "./index.html",
