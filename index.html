@@ -68,12 +68,46 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   font-size: 12px; padding: 4px 8px; border-radius: 999px; cursor: pointer;
 }
 .hidden-chip:hover { color: #e6e8eb; border-color: #4a5160; }
+.bat { margin-right: 8px; }
+.bat.low { color: #f6ad55; }
+.bat.crit { color: #fc8181; }
+.sd-panel { display: none; border-bottom: 1px solid #262a33; font-size: 13px; margin-bottom: 8px; }
+.sd-panel summary {
+  list-style: none; display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px; cursor: pointer;
+}
+.sd-panel summary::-webkit-details-marker { display: none; }
+.sd-panel summary::before { content: "\25B8"; color: #8b93a1; }
+.sd-panel[open] summary::before { content: "\25BE"; }
+.sd-title { font-weight: 600; white-space: nowrap; }
+.sd-summary { margin-left: auto; color: #8b93a1; font-size: 12px; text-align: right; }
+.sd-summary.rec { color: #68d391; }
+.sd-summary.err { color: #fc8181; }
+.sd-body { padding: 0 16px 12px; }
+.sd-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.sd-row label { color: #8b93a1; font-size: 12px; }
+.sd-note { font-size: 12px; color: #565d6b; margin-bottom: 8px; line-height: 1.4; }
+.sd-status { font-size: 12px; color: #8b93a1; line-height: 1.6; margin-bottom: 10px; }
+.sd-status .warn { color: #f6ad55; }
+.sd-status .err { color: #fc8181; }
+.sd-files-head { justify-content: space-between; color: #8b93a1; font-size: 12px; margin-bottom: 4px; }
+.sd-progress { display: none; align-items: center; gap: 8px; font-size: 12px; color: #63b3ed; margin-bottom: 8px; }
+.sd-progress progress { flex: 1; min-width: 80px; height: 8px; }
+.file-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #1d2027; }
+.file-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 12px;
+}
+.file-size { color: #8b93a1; font-size: 12px; white-space: nowrap; }
+.file-size.rec { color: #68d391; }
+.file-row button, .sd-files-head button, .sd-progress button { padding: 4px 10px; min-height: 30px; font-size: 12px; }
+.file-empty { color: #565d6b; font-size: 12px; padding: 6px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>Messgeraet</h1>
-  <div class="status"><span id="dot" class="dot"></span><span id="statusText">Getrennt</span></div>
+  <div class="status"><span id="batText" class="bat"></span><span id="dot" class="dot"></span><span id="statusText">Getrennt</span></div>
 </header>
 <div class="toolbar">
   <button id="btnConnect" class="primary">Mit Messgeraet verbinden</button>
@@ -86,6 +120,35 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   <button class="preset-btn" data-span="300">5 min</button>
   <button id="btnLive">Live</button>
 </div>
+<details class="sd-panel" id="sdPanel">
+  <summary><span class="sd-title">Langzeitmessung (SD-Karte)</span><span class="sd-summary" id="sdSummary"></span></summary>
+  <div class="sd-body">
+    <div class="sd-row">
+      <label for="sdInterval">Intervall</label>
+      <select id="sdInterval">
+        <option value="40">40 ms (jeder Messwert)</option>
+        <option value="200">200 ms</option>
+        <option value="1000" selected>1 s</option>
+        <option value="5000">5 s</option>
+        <option value="10000">10 s</option>
+        <option value="60000">1 min</option>
+      </select>
+      <button id="btnLog" class="primary" disabled>Aufzeichnung starten</button>
+    </div>
+    <div class="sd-note">Schaltflanken (DI, Netzspannung) und Marker werden unabhaengig vom Intervall sofort gespeichert. Die Aufzeichnung laeuft auch ohne Bluetooth-Verbindung weiter.</div>
+    <div class="sd-status" id="sdStatus"></div>
+    <div class="sd-row sd-files-head">
+      <span>Dateien auf der Karte</span>
+      <button id="btnFilesRefresh">Aktualisieren</button>
+    </div>
+    <div class="sd-progress" id="sdProgress">
+      <progress id="sdProgressBar" max="1" value="0"></progress>
+      <span id="sdProgressText"></span>
+      <button id="btnDownloadCancel">Abbrechen</button>
+    </div>
+    <div id="sdFiles"></div>
+  </div>
+</details>
 <div class="gesture-hint">Ziehen zum Scrollen · zwei Finger bzw. Mausrad zum Zoomen</div>
 <div id="markerList"></div>
 <div id="hiddenList"></div>
@@ -102,6 +165,8 @@ const SAMPLE_UUID   = '083cfd49-1af0-4781-ad1b-de854566c8bb';
 const CONTROL_UUID  = '47a03c81-b4e6-4f47-b8b1-8668beeac41c';
 const HISTORY_UUID  = '1079034a-acd2-460c-844e-3bcab8d5eb1b';
 const MARKERS_UUID  = '0a2a3e4c-b842-4454-ad48-062a179e480f';
+const STATUS_UUID   = '69d5e8df-21e0-4d70-9ddc-b1b9346a82c4';   // ab Firmware Ver1
+const FILES_UUID    = 'f3025d1a-1296-4630-8a0c-bfa2d5802520';   // ab Firmware Ver1
 
 const PALETTE = ['#4fd1c5', '#f6ad55', '#63b3ed', '#fc8181', '#b794f4', '#68d391', '#f687b3', '#faf089'];
 const MAX_SAMPLES = 3000;
@@ -118,6 +183,23 @@ let viewSpanMs = 60000;      // aktuell sichtbarer Zeitraum (Zoom-Level)
 let viewEndMs = null;        // null = folgt live, sonst eingefrorener Zeitpunkt
 let markers = [];            // { id, t, label } -- serverseitig verwaltet
 let incomingMarkers = [];    // Sammelpuffer, waehrend eine Marker-Liste hereinkommt
+
+let statusChar = null;
+let filesChar = null;
+let devStatus = null;        // letzter Geraetestatus (Akku, SD-Karte, Langzeitmessung)
+let fileList = [];           // Dateien auf der SD-Karte: { name, size, active }
+let incomingFiles = [];      // Sammelpuffer, waehrend eine Dateiliste hereinkommt
+let download = null;         // laufender Download: { name, size, chunks, received, t0, lastUi }
+
+// Alle Schreibzugriffe laufen nacheinander ueber diese Kette - zwei
+// gleichzeitige GATT-Operationen lehnt der Browser sonst ab.
+let gattQueue = Promise.resolve();
+function gattWrite(char, bytes) {
+  if (!char) return Promise.resolve();
+  const run = () => char.writeValue(bytes);
+  gattQueue = gattQueue.then(run, run).catch(e => console.warn('BLE-Schreiben fehlgeschlagen:', e));
+  return gattQueue;
+}
 
 let hiddenChannels = new Set();
 try {
@@ -227,10 +309,56 @@ async function doConnect() {
   markersChar.addEventListener('characteristicvaluechanged', e => handleMarkerPacket(e.target.value));
   await markersChar.startNotifications();
 
+  await setupDeviceExtras(service);
+
   setStatus(true, 'Verbunden');
 }
 
+// Status (Akku, SD-Karte) und Dateizugriff gibt es erst ab Firmware Ver1.
+// Fehlen die Characteristics (Prototyp), laeuft die Seite ohne sie weiter.
+async function setupDeviceExtras(service) {
+  statusChar = null;
+  filesChar = null;
+  devStatus = null;
+  fileList = [];
+  incomingFiles = [];
+  download = null;
+  try {
+    statusChar = await service.getCharacteristic(STATUS_UUID);
+    statusChar.addEventListener('characteristicvaluechanged', e => handleStatusPacket(e.target.value));
+    await statusChar.startNotifications();
+
+    filesChar = await service.getCharacteristic(FILES_UUID);
+    filesChar.addEventListener('characteristicvaluechanged', e => handleFilesPacket(e.target.value));
+    await filesChar.startNotifications();
+
+    sendTimeSync();
+    requestFileList();
+  } catch (e) {
+    console.log('Geraet ohne Status-/SD-Funktion (Prototyp-Firmware):', e);
+    statusChar = null;
+    filesChar = null;
+  }
+  renderDeviceStatus();
+  renderFileList();
+}
+
+// Uhrzeit ans Geraet schicken (es hat keine eigene Uhr): Befehl 0x12,
+// ms seit 1970 (int64), Zeitzonen-Offset in Minuten (int16).
+function sendTimeSync() {
+  const dv = new DataView(new ArrayBuffer(11));
+  dv.setUint8(0, 0x12);
+  dv.setBigInt64(1, BigInt(Date.now()), true);
+  dv.setInt16(9, -new Date().getTimezoneOffset(), true);
+  gattWrite(controlChar, dv);
+}
+
 function onDisconnected() {
+  statusChar = null;
+  filesChar = null;
+  devStatus = null;
+  download = null;
+  renderDeviceStatus();
   setStatus(false, 'Getrennt – verbinde neu…');
   setTimeout(() => {
     if (!bleDevice) return;
@@ -323,7 +451,8 @@ function updateReadouts(v) {
       el.textContent = v[idx] > 0.5 ? 'EIN' : 'AUS';
       el.classList.toggle('on', v[idx] > 0.5);
     } else {
-      el.textContent = v[idx].toFixed(2) + ' V';
+      const dec = (typeof ch.dec === 'number') ? ch.dec : 2;
+      el.textContent = v[idx].toFixed(dec) + ' ' + (ch.unit || 'V');
     }
   });
 }
@@ -382,7 +511,7 @@ function renderMarkerList() {
       redrawAll();
       if (markersChar) {
         const buf = new Uint8Array([2, m.id & 0xff, (m.id >> 8) & 0xff]);
-        markersChar.writeValue(buf).catch(() => {});
+        gattWrite(markersChar, buf);
       }
     });
     chip.appendChild(del);
@@ -465,9 +594,291 @@ function drawChannel(idx, sorted) {
 }
 
 function writeControl(byte) {
-  if (!controlChar) return;
-  controlChar.writeValue(new Uint8Array([byte])).catch(() => {});
+  gattWrite(controlChar, new Uint8Array([byte]));
 }
+
+// ---- Geraetestatus: Akku, SD-Karte, Langzeitmessung ----
+const SD_ERRORS = {
+  1: 'SD-Karte nicht lesbar (muss FAT32-formatiert sein)',
+  2: 'Datei konnte nicht angelegt werden',
+  3: 'Schreibfehler auf der SD-Karte - Aufzeichnung beendet',
+  4: 'SD-Karte voll - Aufzeichnung beendet',
+  5: 'SD-Karte waehrend der Aufzeichnung entfernt',
+  6: 'Akku leer - Aufzeichnung beendet, Datei gesichert',
+  7: 'Keine SD-Karte eingesteckt'
+};
+const FILE_ERRORS = {
+  1: 'Keine SD-Karte.',
+  2: 'Datei nicht gefunden.',
+  3: 'Diese Datei wird gerade beschrieben - Aufzeichnung zuerst stoppen.',
+  4: 'Download abgebrochen.',
+  5: 'Lesefehler auf der SD-Karte.',
+  6: 'Datei konnte nicht geloescht werden.'
+};
+
+function escapeHtml(t) {
+  return String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+function fmtBytes(n) {
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return Math.round(n / 1024) + ' kB';
+  return n + ' B';
+}
+function fmtMB(mb) {
+  return mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : mb + ' MB';
+}
+function fmtDuration(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+function fmtInterval(ms) {
+  if (ms < 1000) return ms + ' ms';
+  if (ms < 60000) return (ms / 1000) + ' s';
+  return (ms / 60000) + ' min';
+}
+
+// StatusPacket der Firmware (little endian, ohne Padding):
+//  0 version  1 flags  2 battery_mV(u16)  4 logIntervalMs  8 logRows  12 logKB  16 freeMB
+// 20 totalMB  24 logSeconds  28 droppedRows  32 sdError  33 flags2  34 fileName[32]
+function handleStatusPacket(dv) {
+  if (dv.byteLength < 20) return;
+  const flags = dv.getUint8(1);
+  const prev = devStatus;
+  const s = {
+    cardPresent: !!(flags & 0x01), mounted: !!(flags & 0x02), logging: !!(flags & 0x04),
+    batLow: !!(flags & 0x08), batCrit: !!(flags & 0x10), recording: !!(flags & 0x20),
+    mcpOk: !!(flags & 0x40), adsOk: !!(flags & 0x80),
+    batV: dv.getUint16(2, true) / 1000,
+    intervalMs: dv.getUint32(4, true), rows: dv.getUint32(8, true),
+    kB: dv.getUint32(12, true), freeMB: dv.getUint32(16, true),
+    totalMB: 0, seconds: 0, dropped: 0, sdError: 0, timeKnown: false, fileName: ''
+  };
+  if (dv.byteLength >= 66) {
+    s.totalMB = dv.getUint32(20, true);
+    s.seconds = dv.getUint32(24, true);
+    s.dropped = dv.getUint32(28, true);
+    s.sdError = dv.getUint8(32);
+    s.timeKnown = !!(dv.getUint8(33) & 0x01);
+    for (let i = 34; i < 66 && dv.getUint8(i) !== 0; i++) s.fileName += String.fromCharCode(dv.getUint8(i));
+  }
+  devStatus = s;
+  renderDeviceStatus();
+  // Karte gesteckt/gezogen oder Aufzeichnung gestartet/beendet -> Dateiliste neu holen
+  if (prev && (prev.mounted !== s.mounted || prev.logging !== s.logging) && !download) requestFileList();
+}
+
+function renderDeviceStatus() {
+  const s = devStatus;
+  const panel = document.getElementById('sdPanel');
+  const bat = document.getElementById('batText');
+  const summary = document.getElementById('sdSummary');
+  const statusEl = document.getElementById('sdStatus');
+  const btnLog = document.getElementById('btnLog');
+  panel.style.display = filesChar ? 'block' : 'none';
+  if (!s) {
+    bat.textContent = '';
+    summary.textContent = '';
+    statusEl.innerHTML = '';
+    btnLog.disabled = true;
+    document.getElementById('sdProgress').style.display = 'none';
+    return;
+  }
+
+  bat.textContent = s.batV >= 8 ? 'Akku ' + s.batV.toFixed(1) + ' V' : '';
+  bat.className = 'bat' + (s.batCrit ? ' crit' : s.batLow ? ' low' : '');
+
+  // Start/Stop-Button am tatsaechlichen Geraetezustand ausrichten (z.B. wenn
+  // ein zweites verbundenes Geraet den Live-Puffer angehalten hat)
+  running = s.recording;
+  document.getElementById('btnStartStop').textContent = running ? 'Stop' : 'Start';
+
+  let sumText, sumClass = 'sd-summary';
+  if (s.logging) { sumText = 'laeuft · ' + fmtDuration(s.seconds); sumClass += ' rec'; }
+  else if (s.sdError && s.sdError !== 7) { sumText = 'Fehler'; sumClass += ' err'; }
+  else if (!s.cardPresent) sumText = 'Keine SD-Karte';
+  else if (!s.mounted) sumText = 'Karte wird gelesen…';
+  else sumText = 'Bereit · ' + fmtMB(s.freeMB) + ' frei';
+  summary.textContent = sumText;
+  summary.className = sumClass;
+
+  const lines = [];
+  if (s.logging) {
+    lines.push('Datei ' + escapeHtml(s.fileName) + ' · ' + s.rows + ' Zeilen · ' + fmtBytes(s.kB * 1024) +
+               ' · Intervall ' + fmtInterval(s.intervalMs));
+    if (s.dropped > 0) lines.push('<span class="warn">' + s.dropped + ' Zeilen verloren (Karte zu langsam)</span>');
+    if (!s.timeKnown) lines.push('<span class="warn">Uhrzeit unbekannt - Datei enthaelt nur die Laufzeit in ms</span>');
+  } else if (s.sdError && SD_ERRORS[s.sdError]) {
+    lines.push('<span class="' + (s.sdError === 7 ? 'warn' : 'err') + '">' + SD_ERRORS[s.sdError] + '</span>');
+  }
+  if (s.mounted) lines.push('Karte: ' + fmtMB(s.freeMB) + ' frei von ' + fmtMB(s.totalMB));
+  if (s.batCrit) lines.push('<span class="err">Akku leer - bitte wechseln</span>');
+  else if (s.batLow) lines.push('<span class="warn">Akku schwach (' + s.batV.toFixed(1) + ' V)</span>');
+  if (!s.mcpOk) lines.push('<span class="err">Analogeingaenge: ADC (MCP3424) antwortet nicht</span>');
+  if (!s.adsOk) lines.push('<span class="err">Netzspannung: ADC (ADS7828) antwortet nicht</span>');
+  statusEl.innerHTML = lines.join('<br>');
+
+  btnLog.textContent = s.logging ? 'Aufzeichnung stoppen' : 'Aufzeichnung starten';
+  btnLog.classList.toggle('primary', !s.logging);
+  btnLog.disabled = !s.logging && (!s.mounted || s.batCrit);
+  document.getElementById('sdInterval').disabled = s.logging;
+  if (s.logging) document.getElementById('sdInterval').value = String(s.intervalMs);
+}
+
+// ---- Dateien auf der SD-Karte ----
+// Pakete vom Geraet, erstes Byte = Typ:
+//   'L' Listeneintrag: Flags(1), Groesse(u32), Name
+//   'S' Download-Start: Groesse(u32)      'D' Download-Daten
+//   'E' Ende: Vorgang(1 Liste, 2 Download, 3 Loeschen), Status, Wert(u32)
+function requestFileList() {
+  if (!filesChar) return;
+  incomingFiles = [];
+  gattWrite(filesChar, new Uint8Array([1]));
+}
+
+function fileCommand(cmd, name) {
+  const nameBytes = new TextEncoder().encode(name);
+  const buf = new Uint8Array(1 + nameBytes.length);
+  buf[0] = cmd;
+  buf.set(nameBytes, 1);
+  return gattWrite(filesChar, buf);
+}
+
+function handleFilesPacket(dv) {
+  if (dv.byteLength < 1) return;
+  const type = dv.getUint8(0);
+  if (type === 0x4C && dv.byteLength > 6) {            // 'L'
+    const bytes = new Uint8Array(dv.buffer, dv.byteOffset + 6, dv.byteLength - 6);
+    incomingFiles.push({
+      name: new TextDecoder().decode(bytes),
+      size: dv.getUint32(2, true),
+      active: !!(dv.getUint8(1) & 0x01)
+    });
+  } else if (type === 0x53 && dv.byteLength >= 5) {    // 'S'
+    if (download) download.size = dv.getUint32(1, true);
+  } else if (type === 0x44) {                          // 'D'
+    if (!download) return;
+    download.chunks.push(new Uint8Array(dv.buffer.slice(dv.byteOffset + 1, dv.byteOffset + dv.byteLength)));
+    download.received += dv.byteLength - 1;
+    const now = performance.now();
+    if (now - download.lastUi > 200) { download.lastUi = now; renderDownloadProgress(); }
+  } else if (type === 0x45 && dv.byteLength >= 3) {    // 'E'
+    const op = dv.getUint8(1), status = dv.getUint8(2);
+    if (op === 1) {
+      fileList = incomingFiles.sort((a, b) => b.name.localeCompare(a.name));
+      incomingFiles = [];
+      renderFileList();
+    } else if (op === 2) {
+      finishDownload(status);
+    } else if (op === 3) {
+      if (status !== 0) alert(FILE_ERRORS[status] || 'Loeschen fehlgeschlagen.');
+      requestFileList();
+    }
+  }
+}
+
+function renderFileList() {
+  const el = document.getElementById('sdFiles');
+  el.innerHTML = '';
+  if (!fileList.length) {
+    const empty = document.createElement('div');
+    empty.className = 'file-empty';
+    empty.textContent = (devStatus && !devStatus.mounted) ? 'Keine SD-Karte.' : 'Noch keine Messdateien.';
+    el.appendChild(empty);
+    return;
+  }
+  fileList.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'file-row';
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = f.name;
+    const size = document.createElement('span');
+    size.className = 'file-size' + (f.active ? ' rec' : '');
+    size.textContent = f.active ? 'laeuft' : fmtBytes(f.size);
+    const btnGet = document.createElement('button');
+    btnGet.textContent = 'Laden';
+    btnGet.disabled = f.active || !!download;
+    btnGet.addEventListener('click', () => startDownload(f));
+    const btnDel = document.createElement('button');
+    btnDel.textContent = 'Loeschen';
+    btnDel.disabled = f.active || !!download;
+    btnDel.addEventListener('click', () => {
+      if (confirm('Datei ' + f.name + ' von der SD-Karte loeschen?')) fileCommand(3, f.name);
+    });
+    row.append(name, size, btnGet, btnDel);
+    el.appendChild(row);
+  });
+}
+
+function startDownload(f) {
+  if (download || !filesChar) return;
+  download = { name: f.name, size: f.size, chunks: [], received: 0, t0: performance.now(), lastUi: 0 };
+  renderDownloadProgress();
+  renderFileList();
+  fileCommand(2, f.name);
+}
+
+function renderDownloadProgress() {
+  const box = document.getElementById('sdProgress');
+  if (!download) { box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  const frac = download.size ? Math.min(1, download.received / download.size) : 0;
+  document.getElementById('sdProgressBar').value = frac;
+  const secs = (performance.now() - download.t0) / 1000;
+  const rate = secs > 0.5 ? ' · ' + fmtBytes(Math.round(download.received / secs)) + '/s' : '';
+  document.getElementById('sdProgressText').textContent =
+    fmtBytes(download.received) + ' von ' + fmtBytes(download.size) + rate;
+}
+
+function finishDownload(status) {
+  const d = download;
+  download = null;
+  renderDownloadProgress();
+  renderFileList();
+  if (!d) return;
+  if (status !== 0) {
+    if (status !== 4) alert(FILE_ERRORS[status] || 'Download fehlgeschlagen.');
+    return;
+  }
+  const blob = new Blob(d.chunks, { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = d.name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btnLog').addEventListener('click', () => {
+  if (!devStatus || !controlChar) return;
+  if (devStatus.logging) {
+    if (!confirm('Langzeitmessung auf der SD-Karte beenden?')) return;
+    gattWrite(controlChar, new Uint8Array([0x11]));
+  } else {
+    const ms = parseInt(document.getElementById('sdInterval').value, 10);
+    try { localStorage.setItem('sdInterval', String(ms)); } catch (e) {}
+    const dv = new DataView(new ArrayBuffer(5));
+    dv.setUint8(0, 0x10);
+    dv.setUint32(1, ms, true);
+    sendTimeSync();   // Uhrzeit direkt vor dem Start noch einmal auffrischen
+    gattWrite(controlChar, dv);
+  }
+});
+
+document.getElementById('btnFilesRefresh').addEventListener('click', () => {
+  if (!download) requestFileList();
+});
+
+document.getElementById('btnDownloadCancel').addEventListener('click', () => {
+  gattWrite(filesChar, new Uint8Array([4]));
+});
+
+try {
+  const savedInterval = localStorage.getItem('sdInterval');
+  if (savedInterval && document.querySelector('#sdInterval option[value="' + savedInterval + '"]')) {
+    document.getElementById('sdInterval').value = savedInterval;
+  }
+} catch (e) {}
 
 document.getElementById('btnConnect').addEventListener('click', () => {
   if (!navigator.bluetooth) {
@@ -485,12 +896,12 @@ document.getElementById('btnStartStop').addEventListener('click', () => {
 
 document.getElementById('btnMarker').addEventListener('click', () => {
   if (!markersChar) return;
-  markersChar.writeValue(new Uint8Array([1])).catch(() => {});
+  gattWrite(markersChar, new Uint8Array([1]));
 });
 
 document.getElementById('btnClear').addEventListener('click', () => {
   writeControl(2);
-  if (markersChar) markersChar.writeValue(new Uint8Array([3])).catch(() => {});
+  if (markersChar) gattWrite(markersChar, new Uint8Array([3]));
   sampleMap.clear();
   markers = [];
   renderMarkerList();
