@@ -68,9 +68,24 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   font-size: 12px; padding: 4px 8px; border-radius: 999px; cursor: pointer;
 }
 .hidden-chip:hover { color: #e6e8eb; border-color: #4a5160; }
-.bat { margin-right: 8px; }
-.bat.low { color: #f6ad55; }
-.bat.crit { color: #fc8181; }
+.bat { display: none; align-items: center; gap: 6px; margin-right: 10px; white-space: nowrap; }
+.bat-icon {
+  position: relative; box-sizing: border-box; width: 27px; height: 14px; padding: 2px;
+  border: 1.5px solid #8b93a1; border-radius: 3px; margin-right: 3px;
+}
+.bat-icon::after {
+  content: ""; position: absolute; right: -4.5px; top: 3px; width: 2.5px; height: 5px;
+  background: #8b93a1; border-radius: 0 1.5px 1.5px 0;
+}
+.bat-fill { display: block; height: 100%; width: 0; background: #68d391; border-radius: 1px; }
+.bat-pct { color: #e6e8eb; font-variant-numeric: tabular-nums; }
+.bat-volt { color: #565d6b; }
+.bat.low .bat-fill { background: #f6ad55; }
+.bat.low .bat-pct { color: #f6ad55; }
+.bat.crit .bat-fill { background: #fc8181; }
+.bat.crit .bat-pct { color: #fc8181; }
+.bat.crit .bat-icon { border-color: #fc8181; }
+.bat.crit .bat-icon::after { background: #fc8181; }
 .sd-panel { display: none; border-bottom: 1px solid #262a33; font-size: 13px; margin-bottom: 8px; }
 .sd-panel summary {
   list-style: none; display: flex; align-items: center; gap: 8px;
@@ -107,7 +122,7 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 <body>
 <header>
   <h1>Messgeraet</h1>
-  <div class="status"><span id="batText" class="bat"></span><span id="dot" class="dot"></span><span id="statusText">Getrennt</span></div>
+  <div class="status"><span id="batBox" class="bat"><span class="bat-icon"><span class="bat-fill" id="batFill"></span></span><span class="bat-pct" id="batPct"></span><span class="bat-volt" id="batVolt"></span></span><span id="dot" class="dot"></span><span id="statusText">Getrennt</span></div>
 </header>
 <div class="toolbar">
   <button id="btnConnect" class="primary">Mit Messgeraet verbinden</button>
@@ -637,9 +652,56 @@ function fmtInterval(ms) {
   return (ms / 60000) + ' min';
 }
 
+// Ungefaehrer Ladezustand des 18-V-Makita-Akkus (5 Li-Ion-Zellen in Reihe) aus der
+// Akkuspannung: [Volt, Prozent], dazwischen wird linear interpoliert. Das Geraet zieht
+// wenig Strom, die Spannung liegt also nah an der Ruhespannung. 0 % = 16,0 V - dort
+// beendet die Firmware die Langzeitmessung (BAT_CRIT_V), bevor die Hardware abschaltet.
+const BAT_CURVE = [
+  [16.0, 0], [17.0, 5], [17.5, 10], [18.0, 20], [18.3, 30], [18.6, 40],
+  [18.9, 50], [19.25, 60], [19.6, 70], [20.0, 80], [20.5, 90], [21.0, 100]
+];
+function batteryPercent(v) {
+  if (v <= BAT_CURVE[0][0]) return 0;
+  for (let i = 1; i < BAT_CURVE.length; i++) {
+    const [v1, p1] = BAT_CURVE[i];
+    if (v <= v1) {
+      const [v0, p0] = BAT_CURVE[i - 1];
+      return Math.round(p0 + (p1 - p0) * (v - v0) / (v1 - v0));
+    }
+  }
+  return 100;
+}
+
+// Schaetzt aus freiem Kartenspeicher und bisheriger Datenrate, wie lange die laufende
+// Aufzeichnung noch weitergehen kann. Zeilengroesse und Zeilen pro Sekunde werden gemessen
+// (zusaetzliche Zeilen durch Schaltflanken sind damit enthalten); in den ersten Sekunden,
+// solange noch zu wenig Daten da sind, wird mit dem eingestellten Intervall gerechnet.
+const LOG_NOMINAL_ROW_BYTES = 110;
+const LOG_RESERVE_MB = 8;            // so viel laesst die Firmware auf der Karte frei
+function estimateLogging(s) {
+  const sessionKB = (s.sessionKB !== null) ? s.sessionKB : s.kB;
+  const rowBytes = (s.rows >= 20 && sessionKB >= 16) ? sessionKB * 1024 / s.rows : LOG_NOMINAL_ROW_BYTES;
+  const rowsPerSec = (s.rows >= 20 && s.seconds >= 20) ? s.rows / s.seconds : 1000 / Math.max(1, s.intervalMs);
+  const bytesPerSec = rowBytes * rowsPerSec;
+  const freeBytes = Math.max(0, s.freeMB - LOG_RESERVE_MB) * 1048576;
+  return { bytesPerSec: bytesPerSec, seconds: bytesPerSec > 0 ? freeBytes / bytesPerSec : Infinity };
+}
+function fmtRemaining(sec) {
+  if (!isFinite(sec) || sec >= 365 * 86400) return 'mehr als 1 Jahr';
+  return 'ca. ' + fmtSpan(sec);
+}
+function fmtSpan(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d >= 10) return d + ' Tage';
+  if (d >= 1) return d + (d === 1 ? ' Tag ' : ' Tage ') + h + ' h';
+  if (h >= 1) return h + ' h ' + m + ' min';
+  return m + ' min';
+}
+
 // StatusPacket der Firmware (little endian, ohne Padding):
 //  0 version  1 flags  2 battery_mV(u16)  4 logIntervalMs  8 logRows  12 logKB  16 freeMB
 // 20 totalMB  24 logSeconds  28 droppedRows  32 sdError  33 flags2  34 fileName[32]
+// 66 logSessionKB (ab Firmware 1.1)
 function handleStatusPacket(dv) {
   if (dv.byteLength < 20) return;
   const flags = dv.getUint8(1);
@@ -651,7 +713,7 @@ function handleStatusPacket(dv) {
     batV: dv.getUint16(2, true) / 1000,
     intervalMs: dv.getUint32(4, true), rows: dv.getUint32(8, true),
     kB: dv.getUint32(12, true), freeMB: dv.getUint32(16, true),
-    totalMB: 0, seconds: 0, dropped: 0, sdError: 0, timeKnown: false, fileName: ''
+    totalMB: 0, seconds: 0, dropped: 0, sdError: 0, timeKnown: false, fileName: '', sessionKB: null
   };
   if (dv.byteLength >= 66) {
     s.totalMB = dv.getUint32(20, true);
@@ -661,6 +723,7 @@ function handleStatusPacket(dv) {
     s.timeKnown = !!(dv.getUint8(33) & 0x01);
     for (let i = 34; i < 66 && dv.getUint8(i) !== 0; i++) s.fileName += String.fromCharCode(dv.getUint8(i));
   }
+  if (dv.byteLength >= 70) s.sessionKB = dv.getUint32(66, true);
   devStatus = s;
   renderDeviceStatus();
   // Karte gesteckt/gezogen oder Aufzeichnung gestartet/beendet -> Dateiliste neu holen
@@ -670,13 +733,13 @@ function handleStatusPacket(dv) {
 function renderDeviceStatus() {
   const s = devStatus;
   const panel = document.getElementById('sdPanel');
-  const bat = document.getElementById('batText');
+  const bat = document.getElementById('batBox');
   const summary = document.getElementById('sdSummary');
   const statusEl = document.getElementById('sdStatus');
   const btnLog = document.getElementById('btnLog');
   panel.style.display = filesChar ? 'block' : 'none';
   if (!s) {
-    bat.textContent = '';
+    bat.style.display = 'none';
     summary.textContent = '';
     statusEl.innerHTML = '';
     btnLog.disabled = true;
@@ -684,8 +747,19 @@ function renderDeviceStatus() {
     return;
   }
 
-  bat.textContent = s.batV >= 8 ? 'Akku ' + s.batV.toFixed(1) + ' V' : '';
-  bat.className = 'bat' + (s.batCrit ? ' crit' : s.batLow ? ' low' : '');
+  // Akkusymbol: Fuellstand + Prozent, Spannung klein daneben. Unter 8 V haengt kein Akku
+  // am Messeingang (z.B. Test am Labornetzteil) -> Symbol ausblenden.
+  if (s.batV >= 8) {
+    const pct = batteryPercent(s.batV);
+    bat.style.display = 'inline-flex';
+    bat.className = 'bat' + ((s.batCrit || pct <= 5) ? ' crit' : (s.batLow || pct <= 20) ? ' low' : '');
+    bat.title = 'Akku ca. ' + pct + ' % (' + s.batV.toFixed(2) + ' V)';
+    document.getElementById('batFill').style.width = (pct > 0 ? Math.max(8, pct) : 0) + '%';
+    document.getElementById('batPct').textContent = pct + ' %';
+    document.getElementById('batVolt').textContent = s.batV.toFixed(1) + ' V';
+  } else {
+    bat.style.display = 'none';
+  }
 
   // Start/Stop-Button am tatsaechlichen Geraetezustand ausrichten (z.B. wenn
   // ein zweites verbundenes Geraet den Live-Puffer angehalten hat)
@@ -705,6 +779,9 @@ function renderDeviceStatus() {
   if (s.logging) {
     lines.push('Datei ' + escapeHtml(s.fileName) + ' · ' + s.rows + ' Zeilen · ' + fmtBytes(s.kB * 1024) +
                ' · Intervall ' + fmtInterval(s.intervalMs));
+    const est = estimateLogging(s);
+    lines.push('<span' + (est.seconds < 3600 ? ' class="warn"' : '') + '>Speicher reicht noch ' +
+               fmtRemaining(est.seconds) + '</span> (aktuell ' + fmtBytes(Math.round(est.bytesPerSec * 3600)) + ' pro Stunde)');
     if (s.dropped > 0) lines.push('<span class="warn">' + s.dropped + ' Zeilen verloren (Karte zu langsam)</span>');
     if (!s.timeKnown) lines.push('<span class="warn">Uhrzeit unbekannt - Datei enthaelt nur die Laufzeit in ms</span>');
   } else if (s.sdError && SD_ERRORS[s.sdError]) {
