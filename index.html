@@ -86,7 +86,8 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 .bat.crit .bat-pct { color: #fc8181; }
 .bat.crit .bat-icon { border-color: #fc8181; }
 .bat.crit .bat-icon::after { background: #fc8181; }
-.sd-panel { display: none; border-bottom: 1px solid #262a33; font-size: 13px; margin-bottom: 8px; }
+.sd-panel { display: none; border-bottom: 1px solid #262a33; font-size: 13px; }
+#calPanel { margin-bottom: 8px; }
 .sd-panel summary {
   list-style: none; display: flex; align-items: center; gap: 8px;
   padding: 10px 16px; cursor: pointer;
@@ -103,6 +104,7 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 .sd-row label { color: #8b93a1; font-size: 12px; }
 .sd-note { font-size: 12px; color: #565d6b; margin-bottom: 8px; line-height: 1.4; }
 .sd-status { font-size: 12px; color: #8b93a1; line-height: 1.6; margin-bottom: 10px; }
+.sd-status .ok { color: #68d391; }
 .sd-status .warn { color: #f6ad55; }
 .sd-status .err { color: #fc8181; }
 .sd-files-head { justify-content: space-between; color: #8b93a1; font-size: 12px; margin-bottom: 4px; }
@@ -164,6 +166,16 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
     <div id="sdFiles"></div>
   </div>
 </details>
+<details class="sd-panel" id="calPanel">
+  <summary><span class="sd-title">Kalibrierung</span><span class="sd-summary" id="calSummary"></span></summary>
+  <div class="sd-body">
+    <div class="sd-row">
+      <button id="btnZero">Nullabgleich AI 1-4</button>
+    </div>
+    <div class="sd-note">Gleicht den Nullpunkt der Analogeingaenge ab. Dazu muessen an jedem Eingang die Klemmen AI+ und AI- kurzgeschlossen sein. Die Korrektur wird im Geraet gespeichert und bleibt auch nach einem Akkuwechsel erhalten.</div>
+    <div class="sd-status" id="calStatus"></div>
+  </div>
+</details>
 <div class="gesture-hint">Ziehen zum Scrollen · zwei Finger bzw. Mausrad zum Zoomen</div>
 <div id="markerList"></div>
 <div id="hiddenList"></div>
@@ -205,6 +217,9 @@ let devStatus = null;        // letzter Geraetestatus (Akku, SD-Karte, Langzeitm
 let fileList = [];           // Dateien auf der SD-Karte: { name, size, active }
 let incomingFiles = [];      // Sammelpuffer, waehrend eine Dateiliste hereinkommt
 let download = null;         // laufender Download: { name, size, chunks, received, t0, lastUi }
+let zeroPending = null;      // laufender Nullabgleich: { seq, timer }
+let zeroResult = null;       // Ergebnis des letzten Nullabgleichs: { cls, text }
+let clockOffsetMs = null;    // Uhrzeit = t_ms + clockOffsetMs (fuer die Zeit-Spalte im CSV-Download)
 
 // Alle Schreibzugriffe laufen nacheinander ueber diese Kette - zwei
 // gleichzeitige GATT-Operationen lehnt der Browser sonst ab.
@@ -302,6 +317,7 @@ function subscribeChannels(channelsChar) {
 }
 
 async function doConnect() {
+  clockOffsetMs = null;   // nach einem Neustart des Geraets beginnt t_ms wieder bei 0
   const server = await bleDevice.gatt.connect();
   const service = await server.getPrimaryService(SERVICE_UUID);
 
@@ -369,6 +385,7 @@ function sendTimeSync() {
 }
 
 function onDisconnected() {
+  if (zeroPending) { clearTimeout(zeroPending.timer); zeroPending = null; }
   statusChar = null;
   filesChar = null;
   devStatus = null;
@@ -417,7 +434,13 @@ function handleSamplePacket(dataView, isHistoryBatch) {
       values.push(dataView.getFloat32(offset + 4 + i * 4, true));
     }
     sampleMap.set(t, values);
-    if (!isHistoryBatch) updateReadouts(values);
+    if (!isHistoryBatch) {
+      // Live-Messwerte kommen fast verzoegerungsfrei an: der kleinste beobachtete
+      // Abstand zwischen Browser-Uhr und t_ms ist der beste Bezug zur Uhrzeit.
+      const off = Date.now() - t;
+      if (clockOffsetMs === null || off < clockOffsetMs) clockOffsetMs = off;
+      updateReadouts(values);
+    }
   }
   pruneSamples();
   document.getElementById('btnDownload').disabled = sampleMap.size === 0;
@@ -702,6 +725,7 @@ function fmtSpan(sec) {
 //  0 version  1 flags  2 battery_mV(u16)  4 logIntervalMs  8 logRows  12 logKB  16 freeMB
 // 20 totalMB  24 logSeconds  28 droppedRows  32 sdError  33 flags2  34 fileName[32]
 // 66 logSessionKB (ab Firmware 1.1)
+// 70 calSeq  71 calMask  72 aiZero_mV[4] (int16)  (ab Firmware 1.2)
 function handleStatusPacket(dv) {
   if (dv.byteLength < 20) return;
   const flags = dv.getUint8(1);
@@ -713,7 +737,8 @@ function handleStatusPacket(dv) {
     batV: dv.getUint16(2, true) / 1000,
     intervalMs: dv.getUint32(4, true), rows: dv.getUint32(8, true),
     kB: dv.getUint32(12, true), freeMB: dv.getUint32(16, true),
-    totalMB: 0, seconds: 0, dropped: 0, sdError: 0, timeKnown: false, fileName: '', sessionKB: null
+    totalMB: 0, seconds: 0, dropped: 0, sdError: 0, timeKnown: false, fileName: '', sessionKB: null,
+    calSeq: null, calMask: 0, aiZero: null
   };
   if (dv.byteLength >= 66) {
     s.totalMB = dv.getUint32(20, true);
@@ -724,11 +749,73 @@ function handleStatusPacket(dv) {
     for (let i = 34; i < 66 && dv.getUint8(i) !== 0; i++) s.fileName += String.fromCharCode(dv.getUint8(i));
   }
   if (dv.byteLength >= 70) s.sessionKB = dv.getUint32(66, true);
+  if (dv.byteLength >= 80) {
+    s.calSeq = dv.getUint8(70);
+    s.calMask = dv.getUint8(71);
+    s.aiZero = [0, 1, 2, 3].map(i => dv.getInt16(72 + i * 2, true));
+  }
+  if (zeroPending && s.calSeq !== null && s.calSeq !== zeroPending.seq) finishZero(s);
   devStatus = s;
   renderDeviceStatus();
   // Karte gesteckt/gezogen oder Aufzeichnung gestartet/beendet -> Dateiliste neu holen
   if (prev && (prev.mounted !== s.mounted || prev.logging !== s.logging) && !download) requestFileList();
 }
+
+// ---- Nullabgleich der Analogeingaenge ----
+function finishZero(s) {
+  clearTimeout(zeroPending.timer);
+  zeroPending = null;
+  const done = [], skipped = [];
+  for (let i = 0; i < 4; i++) ((s.calMask >> i) & 1 ? done : skipped).push('AI ' + (i + 1));
+  if (!skipped.length) {
+    zeroResult = { cls: 'ok', text: 'Nullabgleich fuer alle vier Eingaenge gespeichert.' };
+  } else if (done.length) {
+    zeroResult = { cls: 'warn', text: 'Gespeichert fuer ' + done.join(', ') + '. Nicht abgeglichen: ' + skipped.join(', ') +
+      ' - dort lagen mehr als 0.25 V an, der Eingang war offenbar nicht kurzgeschlossen.' };
+  } else {
+    zeroResult = { cls: 'err', text: s.mcpOk
+      ? 'Nullabgleich nicht uebernommen: an allen Eingaengen lagen mehr als 0.25 V an. Eingaenge kurzschliessen und wiederholen.'
+      : 'Nullabgleich nicht moeglich: der ADC der Analogeingaenge antwortet nicht.' };
+  }
+}
+
+function renderCalibration() {
+  const s = devStatus;
+  const panel = document.getElementById('calPanel');
+  const supported = !!(filesChar && s && s.calSeq !== null);
+  panel.style.display = supported ? 'block' : 'none';
+  if (!supported) return;
+  const btn = document.getElementById('btnZero');
+  btn.disabled = !!zeroPending || !s.mcpOk;
+  btn.textContent = zeroPending ? 'Nullabgleich laeuft…' : 'Nullabgleich AI 1-4';
+  const calibrated = s.aiZero.some(v => v !== 0);
+  document.getElementById('calSummary').textContent = calibrated ? 'Nullpunkt abgeglichen' : 'nicht abgeglichen';
+  const lines = [];
+  if (zeroResult) lines.push('<span class="' + zeroResult.cls + '">' + zeroResult.text + '</span>');
+  lines.push('Gespeicherte Korrektur: ' + s.aiZero.map((v, i) => 'AI ' + (i + 1) + ': ' + v + ' mV').join(' · '));
+  document.getElementById('calStatus').innerHTML = lines.join('<br>');
+}
+
+document.getElementById('btnZero').addEventListener('click', () => {
+  if (!devStatus || devStatus.calSeq === null || zeroPending || !controlChar) return;
+  const ok = confirm(
+    'Nullabgleich der Analogeingaenge AI 1 bis AI 4\n\n' +
+    'Vorher muessen an JEDEM Eingang die Klemmen AI+ und AI- kurzgeschlossen sein ' +
+    '(Drahtbruecke direkt an der Klemme). Es darf kein Signal angeschlossen sein.\n\n' +
+    'Sind alle vier Eingaenge kurzgeschlossen?');
+  if (!ok) return;
+  zeroResult = null;
+  zeroPending = {
+    seq: devStatus.calSeq,
+    timer: setTimeout(() => {
+      zeroPending = null;
+      zeroResult = { cls: 'err', text: 'Keine Rueckmeldung vom Geraet - Nullabgleich nicht durchgefuehrt.' };
+      renderCalibration();
+    }, 10000)
+  };
+  gattWrite(controlChar, new Uint8Array([0x13]));
+  renderCalibration();
+});
 
 function renderDeviceStatus() {
   const s = devStatus;
@@ -738,6 +825,7 @@ function renderDeviceStatus() {
   const statusEl = document.getElementById('sdStatus');
   const btnLog = document.getElementById('btnLog');
   panel.style.display = filesChar ? 'block' : 'none';
+  renderCalibration();
   if (!s) {
     bat.style.display = 'none';
     summary.textContent = '';
@@ -988,15 +1076,38 @@ document.getElementById('btnClear').addEventListener('click', () => {
 });
 
 document.getElementById('btnDownload').addEventListener('click', () => {
+  // Gleicher Aufbau wie die Aufzeichnungsdatei auf der SD-Karte:
+  //   Zeit;t_ms;<Kanaele>;Marker - Semikolon als Trennzeichen, Dezimalkomma, Spannungen in Volt.
+  const SEP = ';';
   const sorted = getSortedSamples();
-  let csv = 't_ms' + channelMeta.map(c => ',' + c.name).join('') + '\n';
-  sorted.forEach(s => {
-    csv += s.t + s.v.map(v => ',' + v.toFixed(3)).join('') + '\n';
-  });
-  if (markers.length) {
-    csv += '\n# Marker\nt_ms,Label\n';
-    markers.forEach(m => { csv += m.t + ',' + m.label + '\n'; });
+  const pad = (n, w) => String(n).padStart(w, '0');
+  const fmtTime = t => {
+    if (clockOffsetMs === null) return '';
+    const d = new Date(t + clockOffsetMs);
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1, 2) + '-' + pad(d.getDate(), 2) + ' ' +
+           pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' + pad(d.getSeconds(), 2) + ',' + pad(d.getMilliseconds(), 3);
+  };
+  // Marker stehen in der Zeile des ersten Messwerts ab dem Setzen des Markers.
+  // Marker, die aelter sind als der Puffer, fallen weg.
+  const markerAt = new Map();
+  if (sorted.length) {
+    markers.forEach(m => {
+      if (m.t < sorted[0].t) return;
+      const row = sorted.find(s => s.t >= m.t) || sorted[sorted.length - 1];
+      markerAt.set(row.t, markerAt.has(row.t) ? markerAt.get(row.t) + ' ' + m.label : m.label);
+    });
   }
+  const rows = ['Zeit' + SEP + 't_ms' + channelMeta.map(c => SEP + c.name + (c.unit ? ' [' + c.unit + ']' : '')).join('') + SEP + 'Marker'];
+  sorted.forEach(s => {
+    const cells = s.v.map((v, i) => {
+      const ch = channelMeta[i];
+      if (ch.kind === 'digital') return v > 0.5 ? '1' : '0';
+      const dec = (typeof ch.dec === 'number') ? ch.dec + 1 : 3;
+      return v.toFixed(dec).replace('.', ',');
+    });
+    rows.push(fmtTime(s.t) + SEP + s.t + SEP + cells.join(SEP) + SEP + (markerAt.get(s.t) || ''));
+  });
+  const csv = rows.join('\r\n') + '\r\n';
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
