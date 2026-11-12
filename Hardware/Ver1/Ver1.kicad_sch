@@ -1,0 +1,546 @@
+(kicad_sch
+	(version 20260306)
+	(generator "eeschema")
+	(generator_version "10.0")
+	(uuid "ef43e420-21c7-4dfd-964e-a28c17de79da")
+	(paper "A4")
+	(lib_symbols)
+	(junction
+		(at 184.15 77.47)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "2600ef0a-1a94-4042-b612-6cd1fbf07106")
+	)
+	(junction
+		(at 181.61 80.01)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "fef3fc2c-f916-4aef-aff1-8f3a97d3f61d")
+	)
+	(wire
+		(pts
+			(xy 170.18 38.1) (xy 198.12 38.1)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "056b73fc-0169-4e8c-9f0d-8b36caa66d39")
+	)
+	(wire
+		(pts
+			(xy 184.15 48.26) (xy 184.15 124.46)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "0d4adc8c-4133-49ca-866f-ad4b98774b7f")
+	)
+	(wire
+		(pts
+			(xy 170.18 48.26) (xy 184.15 48.26)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "101f4541-b638-4901-9db3-e15d9786b2b1")
+	)
+	(wire
+		(pts
+			(xy 181.61 50.8) (xy 181.61 127)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "2bdc955c-ffb2-4324-b5ae-7c97c46eb654")
+	)
+	(wire
+		(pts
+			(xy 170.18 40.64) (xy 198.12 40.64)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5220da1a-0188-40cc-8ff8-6415bc0c1b78")
+	)
+	(wire
+		(pts
+			(xy 184.15 124.46) (xy 198.12 124.46)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "72ad3a41-48bd-4a1a-951d-ec0c64150d57")
+	)
+	(wire
+		(pts
+			(xy 170.18 33.02) (xy 198.12 33.02)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8278be72-3ee7-4545-adb4-734a4b09668f")
+	)
+	(wire
+		(pts
+			(xy 170.18 35.56) (xy 198.12 35.56)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "833767f2-41e4-41d1-80db-d512e2498b9d")
+	)
+	(wire
+		(pts
+			(xy 184.15 77.47) (xy 198.12 77.47)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "84472b98-3181-4210-b43b-db4b7d987cfd")
+	)
+	(wire
+		(pts
+			(xy 81.28 30.48) (xy 109.22 30.48)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "d9857fca-1ced-4c93-a3a7-5c9d46e550cb")
+	)
+	(wire
+		(pts
+			(xy 181.61 80.01) (xy 198.12 80.01)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "e2ed5696-be22-40f7-8e5a-2039cbd51b65")
+	)
+	(wire
+		(pts
+			(xy 181.61 127) (xy 198.12 127)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "f6744d93-4c72-4577-9fca-8730aae8783c")
+	)
+	(wire
+		(pts
+			(xy 170.18 50.8) (xy 181.61 50.8)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "fc9cfe51-2cc0-4413-a832-bca157062000")
+	)
+	(sheet
+		(at 109.22 20.32)
+		(size 60.96 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "077fa57e-cb35-4fe7-911a-0467bb17e7e2")
+		(property "Sheetname" "ESP32"
+			(at 109.22 19.685 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "ESP32.kicad_sch"
+			(at 109.22 60.955 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "VBAT_ADC" input
+			(at 109.22 30.48 180)
+			(uuid "40566973-0602-4893-8855-2c2e3627ac79")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "DI1" input
+			(at 170.18 33.02 0)
+			(uuid "a5ba562a-f026-4948-b5ad-059db6d307ae")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "DI2" input
+			(at 170.18 35.56 0)
+			(uuid "6eb2026a-7741-4d7d-8baa-56372d8a6823")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "DI3" input
+			(at 170.18 38.1 0)
+			(uuid "3da7597d-8d2e-40fd-8f08-6b6d48091b71")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "DI4" input
+			(at 170.18 40.64 0)
+			(uuid "6a16305c-eea2-40da-9db9-e3201a2bee55")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "I2C_SDA" bidirectional
+			(at 170.18 48.26 0)
+			(uuid "513f3216-540c-4bcc-8ecb-7f5e2b00f0f5")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(pin "I2C_SCL" output
+			(at 170.18 50.8 0)
+			(uuid "7b5e40cd-9591-48a9-853a-8400f5562890")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(instances
+			(project "Ver1"
+				(path "/ef43e420-21c7-4dfd-964e-a28c17de79da"
+					(page "3")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 20.32 20.32)
+		(size 60.96 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "1ffbeb4c-ba1f-4e79-a097-c476b85733f6")
+		(property "Sheetname" "Versorgung"
+			(at 20.32 19.685 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Versorgung.kicad_sch"
+			(at 20.32 60.955 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "VBAT_ADC" output
+			(at 81.28 30.48 0)
+			(uuid "b5bc99b6-f82d-4327-af17-bdd21bae7251")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(instances
+			(project "Ver1"
+				(path "/ef43e420-21c7-4dfd-964e-a28c17de79da"
+					(page "2")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 198.12 114.3)
+		(size 60.96 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "83b46db2-c470-4a6c-9741-3014a1db6136")
+		(property "Sheetname" "Netzspannung"
+			(at 198.12 113.665 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Netzspannung.kicad_sch"
+			(at 198.12 155.575 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "I2C_SDA" bidirectional
+			(at 198.12 124.46 180)
+			(uuid "90c1bc52-eddd-4cd4-972b-02d976beda90")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "I2C_SCL" input
+			(at 198.12 127 180)
+			(uuid "25ed27a0-7886-445c-af94-1202278359d2")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(instances
+			(project "Ver1"
+				(path "/ef43e420-21c7-4dfd-964e-a28c17de79da"
+					(page "6")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 198.12 20.32)
+		(size 60.96 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "b83bfea1-d95e-4e6e-8826-cc8b37b49b1a")
+		(property "Sheetname" "Digitaleingänge"
+			(at 198.12 19.685 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Digitaleingaenge.kicad_sch"
+			(at 198.12 61.595 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "DI1" output
+			(at 198.12 33.02 180)
+			(uuid "b7b616fb-4cbf-47cd-b8c0-07c7becc9de7")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "DI2" output
+			(at 198.12 35.56 180)
+			(uuid "aea6b0ea-23ae-41f9-ba21-df24200c43e8")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "DI3" output
+			(at 198.12 38.1 180)
+			(uuid "01b63a49-3819-4012-a20e-ca19fca6672b")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "DI4" output
+			(at 198.12 40.64 180)
+			(uuid "bb78f548-fa7b-4703-9dad-c4410d159c8e")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(instances
+			(project "Ver1"
+				(path "/ef43e420-21c7-4dfd-964e-a28c17de79da"
+					(page "4")
+				)
+			)
+		)
+	)
+	(sheet
+		(at 198.12 67.31)
+		(size 60.96 40.64)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(stroke
+			(width 0.1524)
+			(type solid)
+		)
+		(fill
+			(color 0 0 0 0)
+		)
+		(uuid "e9c041e9-3d99-4f04-b475-7c4117218a13")
+		(property "Sheetname" "Analogeingänge"
+			(at 198.12 66.675 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left bottom)
+			)
+		)
+		(property "Sheetfile" "Analogeingaenge.kicad_sch"
+			(at 198.12 108.585 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left top)
+			)
+		)
+		(pin "I2C_SDA" bidirectional
+			(at 198.12 77.47 180)
+			(uuid "f3f3a6c6-d222-4085-a25a-c8e73c8fb589")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(pin "I2C_SCL" input
+			(at 198.12 80.01 180)
+			(uuid "c1ae2ad6-8cea-461f-a6ae-fd1a3a5a99c4")
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(instances
+			(project "Ver1"
+				(path "/ef43e420-21c7-4dfd-964e-a28c17de79da"
+					(page "5")
+				)
+			)
+		)
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)

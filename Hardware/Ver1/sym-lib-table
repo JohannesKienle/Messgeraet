@@ -1,0 +1,4 @@
+(sym_lib_table
+  (version 7)
+
+  (lib (name "WAGO") (type "KiCad") (uri "${KIPRJMOD}/KiCADv6/2026-10-26_12-10-34.kicad_sym") (options "") (descr "")))
