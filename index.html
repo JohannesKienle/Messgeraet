@@ -39,7 +39,10 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
 .history-banner { background: #16202a; color: #63b3ed; }
 .hint { padding: 16px; font-size: 13px; color: #8b93a1; line-height: 1.5; }
 #channels { padding: 8px 16px 24px; }
-.channel-row { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #1d2027; padding: 8px 0; }
+.channel-row { display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #1d2027; padding: 8px 0; cursor: pointer; }
+.channel-row.expanded { align-items: flex-start; }
+.channel-row.expanded .channel-canvas { height: 240px; }
+.channel-row.expanded .channel-info { padding-top: 4px; }
 .channel-info { width: 128px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; }
 .channel-info .dot { width: 8px; height: 8px; }
 .channel-name { font-size: 12px; color: #8b93a1; }
@@ -48,8 +51,12 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
   font-size: 15px; font-weight: 600;
 }
 .channel-value.on { color: #68d391; }
-.channel-canvas { flex: 1; height: 64px; background: #14171d; border-radius: 6px; cursor: grab; }
-#channels { touch-action: none; user-select: none; }
+/* min-width: 0, sonst richtet sich die Mindestbreite nach dem Seitenverhaeltnis der Zeichenflaeche
+   und ein vergroesserter Kanal wuerde die Seite breiter als den Bildschirm machen */
+.channel-canvas { flex: 1; min-width: 0; height: 64px; background: #14171d; border-radius: 6px; cursor: grab; }
+/* pan-y: senkrechtes Wischen scrollt die Seite, waagrechtes Ziehen und
+   Zwei-Finger-Zoom landen bei der Diagramm-Steuerung im Skript */
+#channels { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .gesture-hint { padding: 0 16px 8px; font-size: 12px; color: #565d6b; }
 #markerList { display: none; flex-wrap: wrap; gap: 6px; padding: 0 16px 10px; }
 .marker-chip {
@@ -176,7 +183,7 @@ button.primary { background: #1e3a34; border-color: #2f5a4e; color: #68d391; }
     <div class="sd-status" id="calStatus"></div>
   </div>
 </details>
-<div class="gesture-hint">Ziehen zum Scrollen · zwei Finger bzw. Mausrad zum Zoomen</div>
+<div class="gesture-hint">Kanal antippen: vergroessern · waagrecht ziehen: Zeitachse verschieben · zwei Finger bzw. Strg + Mausrad: zoomen</div>
 <div id="markerList"></div>
 <div id="hiddenList"></div>
 <div class="demo-banner" id="demoBanner">Demo-Modus: simulierte Werte, bis Sensor-Hardware angeschlossen ist</div>
@@ -239,6 +246,24 @@ try {
 
 function saveHiddenChannels() {
   try { localStorage.setItem('hiddenChannels', JSON.stringify([...hiddenChannels])); } catch (e) {}
+}
+
+// Vergroessert dargestellte Kanaele (per Antippen umschaltbar), wie die
+// ausgeblendeten Kanaele im Browser gemerkt.
+let expandedChannels = new Set();
+try {
+  const savedExpanded = localStorage.getItem('expandedChannels');
+  if (savedExpanded) expandedChannels = new Set(JSON.parse(savedExpanded));
+} catch (e) {}
+
+function toggleExpandChannel(name) {
+  if (expandedChannels.has(name)) expandedChannels.delete(name);
+  else expandedChannels.add(name);
+  try { localStorage.setItem('expandedChannels', JSON.stringify([...expandedChannels])); } catch (e) {}
+  document.querySelectorAll('.channel-row').forEach(row => {
+    row.classList.toggle('expanded', expandedChannels.has(row.dataset.name));
+  });
+  redrawAll();
 }
 
 function hideChannel(name) {
@@ -466,7 +491,8 @@ function buildChannelRows() {
   channelMeta.forEach((ch, idx) => {
     if (hiddenChannels.has(ch.name)) return;   // ausgeblendet, keine Zeile anlegen
     const row = document.createElement('div');
-    row.className = 'channel-row';
+    row.className = 'channel-row' + (expandedChannels.has(ch.name) ? ' expanded' : '');
+    row.dataset.name = ch.name;
     row.innerHTML = `
       <div class="channel-info">
         <span class="dot" style="background:${PALETTE[idx % PALETTE.length]}"></span>
@@ -564,6 +590,13 @@ function redrawAll() {
   if (liveBtn) liveBtn.classList.toggle('primary', viewEndMs !== null);
 }
 
+// Runder Skalenschritt (1, 2, 2.5, 5 x Zehnerpotenz), der mindestens so gross ist wie raw
+function niceStep(raw) {
+  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * pow >= raw - 1e-12) return m * pow;
+  return 10 * pow;
+}
+
 function drawChannel(idx, sorted) {
   const ch = channelMeta[idx];
   const canvas = document.getElementById(`canvas-${idx}`);
@@ -584,6 +617,32 @@ function drawChannel(idx, sorted) {
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
   }
 
+  // Senkrechte Achse der Analogkanaele: vergroessert mit beschrifteter Skala,
+  // in der kleinen Ansicht nur die Nulllinie (wenn der Bereich ueber 0 geht).
+  const yOfValue = val => h - pad - ((val - ch.min) / ((ch.max - ch.min) || 1)) * (h - 2 * pad);
+  if (ch.kind !== 'digital') {
+    if (expandedChannels.has(ch.name)) {
+      const step = niceStep((ch.max - ch.min) / 6);
+      ctx.font = '10px -apple-system, "Segoe UI", sans-serif';
+      ctx.textBaseline = 'middle';
+      for (let v = Math.ceil(ch.min / step - 1e-9) * step; v <= ch.max + step * 1e-6; v += step) {
+        const y = yOfValue(v);
+        const isZero = Math.abs(v) < step * 1e-6;
+        ctx.strokeStyle = isZero ? 'rgba(255,255,255,0.24)' : 'rgba(255,255,255,0.07)';
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.fillText(Number(v.toFixed(3)) + ' ' + (ch.unit || 'V'), 4, Math.min(h - 7, Math.max(7, y)));
+      }
+      ctx.textBaseline = 'alphabetic';
+    } else if (ch.min < 0 && ch.max > 0) {
+      const y = yOfValue(0);
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
   if (!sorted.length) return;
   const windowMs = viewSpanMs;
   const now = currentViewEnd(sorted);
@@ -594,8 +653,7 @@ function drawChannel(idx, sorted) {
   if (pts.length >= 2) {
     const yOf = val => {
       if (ch.kind === 'digital') return val > 0.5 ? pad : h - pad;
-      const norm = (val - ch.min) / ((ch.max - ch.min) || 1);
-      return h - pad - norm * (h - 2 * pad);
+      return yOfValue(val);
     };
     ctx.strokeStyle = PALETTE[idx % PALETTE.length];
     ctx.lineWidth = 1.5;
@@ -1136,6 +1194,9 @@ let activePointers = new Map();
 let dragLastX = null;
 let pinchStartDist = null;
 let pinchStartSpan = null;
+let tapCandidate = null;   // moegliches Antippen eines Kanals: { id, x, y, t, name }
+const TAP_MAX_MOVE_PX = 8;
+const TAP_MAX_MS = 500;
 
 channelsEl.addEventListener('pointerdown', e => {
   if (e.target.closest('.channel-hide')) return;   // Ausblenden-Button nicht als Zieh-/Zoom-Geste einfangen
@@ -1143,7 +1204,10 @@ channelsEl.addEventListener('pointerdown', e => {
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (activePointers.size === 1) {
     dragLastX = e.clientX;
+    const row = e.target.closest('.channel-row');
+    tapCandidate = row ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: performance.now(), name: row.dataset.name } : null;
   } else if (activePointers.size === 2) {
+    tapCandidate = null;
     const pts = Array.from(activePointers.values());
     pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
     pinchStartSpan = viewSpanMs;
@@ -1153,6 +1217,7 @@ channelsEl.addEventListener('pointerdown', e => {
 channelsEl.addEventListener('pointermove', e => {
   if (!activePointers.has(e.pointerId)) return;
   activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (tapCandidate && Math.hypot(e.clientX - tapCandidate.x, e.clientY - tapCandidate.y) > TAP_MAX_MOVE_PX) tapCandidate = null;
   const rect = getRefRect();
   if (!rect) return;
 
@@ -1181,12 +1246,22 @@ function endPointer(e) {
     dragLastX = null;
   }
 }
-channelsEl.addEventListener('pointerup', endPointer);
-channelsEl.addEventListener('pointercancel', endPointer);
-channelsEl.addEventListener('pointerleave', endPointer);
+channelsEl.addEventListener('pointerup', e => {
+  // kurzes Antippen ohne Bewegung = Kanal vergroessern bzw. wieder verkleinern
+  const tap = tapCandidate;
+  tapCandidate = null;
+  endPointer(e);
+  if (tap && tap.id === e.pointerId && performance.now() - tap.t <= TAP_MAX_MS) toggleExpandChannel(tap.name);
+});
+// pointercancel kommt u.a., wenn der Browser die Geste als senkrechtes Scrollen der Seite uebernimmt
+channelsEl.addEventListener('pointercancel', e => { tapCandidate = null; endPointer(e); });
+channelsEl.addEventListener('pointerleave', e => { tapCandidate = null; endPointer(e); });
 
-// ---- Zoom per Mausrad (Desktop/Laptop) ----
+// ---- Zoom per Strg + Mausrad (Desktop/Laptop) ----
+// Das Mausrad allein scrollt die Seite. Die Zoom-Geste auf dem Touchpad
+// (zwei Finger spreizen) kommt im Browser ebenfalls als Strg + Mausrad an.
 channelsEl.addEventListener('wheel', e => {
+  if (!e.ctrlKey && !e.metaKey) return;
   e.preventDefault();
   const rect = getRefRect();
   if (!rect) return;
